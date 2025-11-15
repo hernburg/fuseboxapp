@@ -102,3 +102,24 @@ class WallSeg {
 
 double _min(double x, double y) => x < y ? x : y;
 double _max(double x, double y) => x > y ? x : y;
+
+List<ui.Offset> wallEdges(WallSeg wall) {
+  final n = wall.leftNormal;              // нормаль к стене
+  final halfT = wall.thickMm / 2;
+  final leftShift = n * halfT;
+  final rightShift = -n * halfT;
+
+  final leftA = wall.a + leftShift;
+  final leftB = wall.b + leftShift;
+  final rightA = wall.a + rightShift;
+  final rightB = wall.b + rightShift;
+
+  return [leftA, leftB, rightA, rightB];
+}
+
+/// Возвращает одну из граней (true = левая, false = правая)
+List<ui.Offset> wallEdge(WallSeg wall, {bool left = true}) {
+  final n = wall.leftNormal;
+  final shift = n * (wall.thickMm / 2) * (left ? 1 : -1);
+  return [wall.a + shift, wall.b + shift];
+}

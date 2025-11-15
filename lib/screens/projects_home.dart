@@ -13,7 +13,7 @@ class _ProjectsHomeState extends State<ProjectsHome> {
 
   @override
   Widget build(BuildContext context) {
-    final items = repo.all();
+    final items = repo.list();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Проекты'),
