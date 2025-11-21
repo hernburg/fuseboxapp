@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'screens/projects_home.dart';
 import 'theme/palette.dart';
 import 'screens/calculator_screen.dart';
-import '../widgets/fake_progress.dart';
 
 void main() {
   ErrorWidget.builder = (FlutterErrorDetails d) =>
@@ -128,7 +127,7 @@ class _HomeShellState extends State<HomeShell> {
 
 class _Stub extends StatelessWidget {
   final String title;
-  const _Stub({required this.title, super.key});
+  const _Stub({required this.title});
   @override
   Widget build(BuildContext context) {
     return Scaffold(appBar: AppBar(title: Text(title)), body: const Center(child: Text('MVP')));

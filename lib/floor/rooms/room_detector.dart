@@ -1,180 +1,199 @@
-// lib/floor/rooms/room_detector.dart
-import 'dart:math' as math;
 import 'dart:ui' as ui;
-
 import '../core/wall_model.dart';
 
-class RoomRect {
-  final ui.Rect rectMm;
-  RoomRect(this.rectMm);
+/// Узел (вершина графа)
+class Node {
+  final ui.Offset p;
 
-  double get areaM2 => rectMm.width * rectMm.height / 1e6;
+  Node(this.p);
+
+  @override
+  bool operator ==(Object other) =>
+      other is Node && (other.p - p).distance < 1e-3;
+
+  @override
+  int get hashCode => p.dx.hashCode ^ p.dy.hashCode;
+}
+class Edge {
+  final Node a;
+  final Node b;
+
+  Edge(this.a, this.b);
+
+  double get length => (b.p - a.p).distance;
+}
+class WallGraph {
+  final List<Node> nodes = [];
+  final List<Edge> edges = [];
+
+  Node getOrAddNode(ui.Offset p) {
+    for (final n in nodes) {
+      if ((n.p - p).distance < 1.0) return n;
+    }
+    final n = Node(p);
+    nodes.add(n);
+    return n;
+  }
+
+  void addWall(WallSeg w) {
+    final a = getOrAddNode(w.a);
+    final b = getOrAddNode(w.b);
+    edges.add(Edge(a, b));
+  }
+}
+List<List<Node>> findCycles(WallGraph g) {
+  final adj = <Node, List<Node>>{};
+  for (final e in g.edges) {
+    adj.putIfAbsent(e.a, () => []).add(e.b);
+    adj.putIfAbsent(e.b, () => []).add(e.a);
+  }
+
+  final visited = <Node>{};
+  final stack = <Node>[];
+  final cycles = <List<Node>>[];
+
+  void dfs(Node curr, Node start) {
+    visited.add(curr);
+    stack.add(curr);
+
+    for (final next in adj[curr]!) {
+      if (next == start && stack.length > 2) {
+        cycles.add(List<Node>.from(stack));
+      } else if (!visited.contains(next)) {
+        dfs(next, start);
+      }
+    }
+    stack.removeLast();
+    visited.remove(curr);
+  }
+
+  for (final n in g.nodes) {
+    dfs(n, n);
+    visited.clear();
+    stack.clear();
+  }
+
+  // удаляем дубли и самопересечения
+  final unique = <String, List<Node>>{};
+  for (final c in cycles) {
+    final key = c.map((n) => "${n.p.dx}:${n.p.dy}").join('|');
+    if (!unique.containsKey(key)) unique[key] = c;
+  }
+
+  return unique.values.toList();
+}
+ui.Path cycleToPath(List<Node> nodes) {
+  final path = ui.Path();
+  if (nodes.isEmpty) return path;
+
+  path.moveTo(nodes.first.p.dx, nodes.first.p.dy);
+  for (var i = 1; i < nodes.length; i++) {
+    path.lineTo(nodes[i].p.dx, nodes[i].p.dy);
+  }
+  path.close();
+  return path;
 }
 
-/// Детектор прямоугольных помещений.
-/// tol      — допуск по координатам (мм),
-/// gapTolMm — максимальный «незакрытый» зазор по стене, который считаем
-///            всё равно закрытым (как в Remplanner).
-List<RoomRect> detectRectRooms(
-  List<WallSeg> walls, {
-  double tol = 1.0,
-  double gapTolMm = 60.0,
-}) {
-  if (walls.length < 4) return const [];
+double polygonArea(ui.Path p) {
+  final metrics = p.computeMetrics().toList();
+  if (metrics.isEmpty) return 0;
+  // просто площадь через shoelace
+  final List<ui.Offset> pts = [];
 
-  // --- собираем уникальные x/y из вершин ---
-  final xs = <double>[];
-  final ys = <double>[];
-
-  void addCoord(List<double> list, double v) {
-    for (final e in list) {
-      if ((e - v).abs() <= tol) return;
+  for (final m in metrics) {
+    for (var t = 0.0; t < m.length; t += 10) {
+      pts.add(m.getTangentForOffset(t)!.position);
     }
-    list.add(v);
   }
+
+  double sum = 0;
+  for (var i = 0; i < pts.length; i++) {
+    final j = (i + 1) % pts.length;
+    sum += pts[i].dx * pts[j].dy - pts[j].dx * pts[i].dy;
+  }
+  return sum.abs() / 2;
+}
+List<ui.Path> detectRoomsAllShapes(List<WallSeg> walls) {
+  final g = WallGraph();
 
   for (final w in walls) {
-    addCoord(xs, w.a.dx);
-    addCoord(xs, w.b.dx);
-    addCoord(ys, w.a.dy);
-    addCoord(ys, w.b.dy);
+    g.addWall(w);
   }
 
-  xs.sort();
-  ys.sort();
+  final cycles = findCycles(g);
+  if (cycles.isEmpty) return [];
 
-  // Проверка, что отрезок [from, to] на линии
-  // покрыт горизонтальными или вертикальными отрезками стен
-  // с допуском по маленьким «дыркам» до gapTolMm.
-  bool hasCoverage({
-    required bool horizontal,
-    required double constPos, // y для горизонтальных, x для вертикальных
-    required double from,
-    required double to,
-  }) {
-    final intervals = <ui.Offset>[]; // dx = start, dy = end
+  final rooms = <ui.Path>[];
+  for (final c in cycles) {
+    final path = cycleToPath(c);
+    final area = polygonArea(path);
 
-    for (final w in walls) {
-      final a = w.a;
-      final b = w.b;
-
-      if (horizontal) {
-        final dy1 = (a.dy - constPos).abs();
-        final dy2 = (b.dy - constPos).abs();
-        if (dy1 > tol || dy2 > tol) continue;
-
-        double start = math.min(a.dx, b.dx);
-        double end = math.max(a.dx, b.dx);
-        if (end <= from || start >= to) continue;
-
-        start = math.max(start, from);
-        end = math.min(end, to);
-        if (end - start <= 0) continue;
-
-        intervals.add(ui.Offset(start, end));
-      } else {
-        final dx1 = (a.dx - constPos).abs();
-        final dx2 = (b.dx - constPos).abs();
-        if (dx1 > tol || dx2 > tol) continue;
-
-        double start = math.min(a.dy, b.dy);
-        double end = math.max(a.dy, b.dy);
-        if (end <= from || start >= to) continue;
-
-        start = math.max(start, from);
-        end = math.min(end, to);
-        if (end - start <= 0) continue;
-
-        intervals.add(ui.Offset(start, end));
-      }
-    }
-
-    if (intervals.isEmpty) return false;
-
-    intervals.sort((a, b) => a.dx.compareTo(b.dx));
-
-    double covered = 0.0;
-    double currentStart = intervals[0].dx;
-    double currentEnd = intervals[0].dy;
-    double biggestGap = 0.0;
-
-    for (int i = 1; i < intervals.length; i++) {
-      final iv = intervals[i];
-      if (iv.dx <= currentEnd + tol) {
-        // пересекается или стыкуется
-        if (iv.dy > currentEnd) currentEnd = iv.dy;
-      } else {
-        // зазор
-        final gap = iv.dx - currentEnd;
-        if (gap > biggestGap) biggestGap = gap;
-        covered += currentEnd - currentStart;
-        currentStart = iv.dx;
-        currentEnd = iv.dy;
-      }
-    }
-    covered += currentEnd - currentStart;
-
-    final total = to - from;
-    final uncovered = total - covered;
-
-    // считаем стену «сплошной», если
-    // суммарные дырки и максимальная дырка не больше gapTolMm
-    if (uncovered <= gapTolMm && biggestGap <= gapTolMm) {
-      return true;
-    }
-    return false;
-  }
-
-  final rooms = <RoomRect>[];
-
-  for (int ix1 = 0; ix1 < xs.length; ix1++) {
-    for (int ix2 = ix1 + 1; ix2 < xs.length; ix2++) {
-      final x1 = xs[ix1];
-      final x2 = xs[ix2];
-      if ((x2 - x1).abs() <= tol) continue;
-
-      for (int iy1 = 0; iy1 < ys.length; iy1++) {
-        for (int iy2 = iy1 + 1; iy2 < ys.length; iy2++) {
-          final y1 = ys[iy1];
-          final y2 = ys[iy2];
-          if ((y2 - y1).abs() <= tol) continue;
-
-          // проверяем 4 стороны прямоугольника
-          if (!hasCoverage(
-              horizontal: true, constPos: y1, from: x1, to: x2)) {
-            continue;
-          }
-          if (!hasCoverage(
-              horizontal: true, constPos: y2, from: x1, to: x2)) {
-            continue;
-          }
-          if (!hasCoverage(
-              horizontal: false, constPos: x1, from: y1, to: y2)) {
-            continue;
-          }
-          if (!hasCoverage(
-              horizontal: false, constPos: x2, from: y1, to: y2)) {
-            continue;
-          }
-
-          final rect = ui.Rect.fromLTRB(x1, y1, x2, y2);
-
-          // убираем дубликаты (тот же прямоугольник)
-          bool exists = false;
-          for (final r in rooms) {
-            if ((r.rectMm.left - rect.left).abs() <= tol &&
-                (r.rectMm.top - rect.top).abs() <= tol &&
-                (r.rectMm.right - rect.right).abs() <= tol &&
-                (r.rectMm.bottom - rect.bottom).abs() <= tol) {
-              exists = true;
-              break;
-            }
-          }
-          if (!exists) rooms.add(RoomRect(rect));
-        }
-      }
+    // площадь > 0.5 м² (отсекаем мусор)
+    if (area > 50000) {
+      rooms.add(path);
     }
   }
 
   return rooms;
+}
+List<Room> detectRooms(List<WallSeg> walls) {
+  final paths = detectRoomsAllShapes(walls); // твоя функция, которая делает List<Path>
+
+  final result = <Room>[];
+
+  for (final p in paths) {
+    final outer = <ui.Offset>[];
+
+    // Извлекаем точки Path
+    for (final metric in p.computeMetrics()) {
+      final poly = <ui.Offset>[];
+
+      for (double t = 0; t < metric.length; t += 10) {
+        final pos = metric.getTangentForOffset(t)!.position;
+        poly.add(pos);
+      }
+
+      if (poly.length >= 3) {
+        outer.addAll(poly);
+      }
+    }
+
+    if (outer.length < 3) continue;
+
+    // Вычисление центра
+    final cx = outer.fold(0.0, (s, o) => s + o.dx) / outer.length;
+    final cy = outer.fold(0.0, (s, o) => s + o.dy) / outer.length;
+
+    // Вычисление площади (полигонный метод)
+    double area = 0;
+    for (int i = 0; i < outer.length; i++) {
+      final j = (i + 1) % outer.length;
+      area += outer[i].dx * outer[j].dy - outer[j].dx * outer[i].dy;
+    }
+    area = area.abs() / 2 / 1e6; // мм² → м²
+
+    result.add(
+      Room(
+        outer: outer,
+        holes: const [],
+        centerMm: ui.Offset(cx, cy),
+        areaM2: area,
+      ),
+    );
+  }
+
+  return result;
+}
+class Room {
+  final List<ui.Offset> outer;            // внешний контур
+  final List<List<ui.Offset>> holes;      // отверстия (обычно пусто)
+  final ui.Offset centerMm;               // центр комнаты
+  final double areaM2;                    // площадь м²
+
+  Room({
+    required this.outer,
+    required this.holes,
+    required this.centerMm,
+    required this.areaM2,
+  });
 }

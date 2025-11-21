@@ -1,221 +1,343 @@
 // lib/floor/edit/snapping.dart
 import 'dart:math' as math;
-import 'dart:ui' show Offset, Rect;
+import 'dart:ui' as ui;
 
 import '../core/wall_model.dart';
 
-double _degBetween(Offset a, Offset b) {
-  final la = a.distance, lb = b.distance;
-  if (la == 0 || lb == 0) return 180;
-  final cosv = ((a.dx*b.dx) + (a.dy*b.dy)) / (la*lb);
-  final clamped = cosv.clamp(-1.0, 1.0);
-  return (math.acos(clamped) * 180 / math.pi).abs();
+/// Тип привязки
+enum SnapMode {
+  free,
+  axis,
+  edge,
+  vertex,
 }
 
-double _distPointToLine(Offset p, Offset x0, Offset dirUnit) {
-  final v = p - x0;
-  final cross = (v.dx * dirUnit.dy) - (v.dy * dirUnit.dx);
-  return cross.abs();
+/// Результат привязки
+class SnapResult {
+  final ui.Offset snapped;
+  final ui.Offset? hoverVertex;
+  final SnapMode mode;
+
+  const SnapResult({
+    required this.snapped,
+    this.hoverVertex,
+    this.mode = SnapMode.free,
+  });
 }
 
-// === публичные функции, которые ждёт floor_editor.dart ===
+/// Настройки привязок
+class SnapSettings {
+  final bool enabled;
+  final double stepMm;
+  final double vertexRadiusMm;
+  final double orthoToleranceDeg;
 
-Offset axisSnap(Offset a, Offset b, {double angTolDeg = 10}) {
-  final th = angTolDeg * math.pi / 180.0;
-  final d = b - a;
-  if (d == Offset.zero) return b;
-  final ang = math.atan2(d.dy, d.dx).abs();
-  if (ang <= th || (math.pi - ang) <= th) return Offset(b.dx, a.dy);
-  if ((ang - math.pi/2).abs() <= th)   return Offset(a.dx, b.dy);
-  return b;
+  const SnapSettings({
+    required this.enabled,
+    this.stepMm = 0,
+    this.vertexRadiusMm = 80,
+    this.orthoToleranceDeg = 3,
+  });
 }
 
-Offset snapStartToCornerOrEnd(
-  Offset tapMm,
-  List<WallSeg> walls, {
-  double snapStartMm = 60,
-  bool gridSnapOn = true,
-  double gridMm = 100,
-}) {
-  Offset? nearestVertex;
-  double bestD = snapStartMm + 1;
-  for (final w in walls) {
-    for (final v in [w.a, w.b]) {
-      final d = (v - tapMm).distance;
-      if (d < bestD) { bestD = d; nearestVertex = v; }
+class Snapper {
+  static double _toDeg(double r) => r * 180.0 / math.pi;
+
+  static double _angleDiffDeg(double a, double b) {
+    double d = (a - b).abs();
+    while (d > math.pi) {
+      d -= 2 * math.pi;
     }
-  }
-  if (nearestVertex != null) return nearestVertex!;
-  if (gridSnapOn) {
-    double rd(double v) => (v / gridMm).roundToDouble() * gridMm;
-    return Offset(rd(tapMm.dx), rd(tapMm.dy));
-  }
-  return tapMm;
-}
-
-// Найти стену, к которой принадлежит вершина v (с малым эпсилоном)
-WallSeg? _wallByVertex(Offset v, List<WallSeg> walls, {double epsMm = 1e-3}) {
-  for (final w in walls) {
-    if ((w.a - v).distance <= epsMm || (w.b - v).distance <= epsMm) return w;
-  }
-  return null;
-}
-
-// Сдвиг точки старта на нужную грань стены (кромку), от оси кромку выбираем по направлению новой стены
-// Выбор правильной кромки по направлению драга
-Offset _edgeAttachByDragDirection({
-  required Offset axisStart,     // вершина оси, куда ты кликнул/привязался
-  required Offset dragTarget,    // rawBMm — куда тащишь конец стены
-  required WallSeg baseWall,     // стена, от кромки которой стартуем
-}) {
-  final n = baseWall.leftNormal;
-  final halfT = baseWall.thickMm / 2.0;
-
-  final shiftPos = n * halfT;   // одна кромка
-  final shiftNeg = -shiftPos;   // вторая кромка
-
-  final drag = dragTarget - axisStart;
-
-  // если «проекция» драга на сдвиг положительная — берём эту кромку
-  final usePos = (drag.dx * shiftPos.dx + drag.dy * shiftPos.dy) >= 0;
-  return axisStart + (usePos ? shiftPos : shiftNeg);
-}
-
-Offset smartSnapWallEnd(
-  Offset aMm,
-  Offset rawBMm,
-  List<WallSeg> walls, {
-  double snapEndMm = 40,
-  bool gridSnapOn = true,
-  double gridMm = 100,
-  double parallelTolDeg = 10,
-  double snapParallelGapMm = 2500,
-  double snapEdgeMm = 700,
-  double escapeFactor = 3.0,
-}) {
-  // осевая привязка/сетка к предварительному концу
-  if (gridSnapOn) {
-    double rd(double v) => (v / gridMm).roundToDouble() * gridMm;
-    rawBMm = Offset(rd(rawBMm.dx), rd(rawBMm.dy));
+    return _toDeg(d.abs());
   }
 
-  // прилипание стартовой точки к ближайшей вершине (ось), не меняем пока — это вершина оси
-   final startAxis = snapStartToCornerOrEnd(aMm, walls,
-      snapStartMm: snapEndMm, gridSnapOn: gridSnapOn, gridMm: gridMm);
-
-
-  // первичная ортогональ к предполагаемому концу
-   Offset b = axisSnap(startAxis, rawBMm, angTolDeg: 30);
-
-  // направление новой стены
-  var d = b - startAxis;
-  var len = d.distance;
-  if (len <= 0.0001 || walls.isEmpty) return b;
-  var dir = Offset(d.dx / len, d.dy / len);
-
-  // === КЛЮЧЕВОЕ: перенос старта с оси на КРОМКУ базовой стены ===
-  // Если начало совпало с вершиной какой-либо стены — переносим на нужную грань этой стены
-  final baseWall = _wallByVertex(startAxis, walls, epsMm: 0.5);
-  var aEdge = startAxis;
-   if (baseWall != null) {
-    aEdge = _edgeAttachByDragDirection(
-      axisStart: startAxis,
-      dragTarget: rawBMm,     // важно! направление берём от реального драга
-      baseWall: baseWall,
+  static ui.Offset _closestPointOnSegment(
+    ui.Offset p,
+    ui.Offset a,
+    ui.Offset b,
+  ) {
+    final ab = b - a;
+    final len2 = ab.distanceSquared;
+    if (len2 < 1e-9) return a;
+    final ap = p - a;
+    final t = ((ap.dx * ab.dx) + (ap.dy * ab.dy)) / len2;
+    final clamped = t.clamp(0.0, 1.0).toDouble();
+    return ui.Offset(
+      a.dx + ab.dx * clamped,
+      a.dy + ab.dy * clamped,
     );
-    // сохраняем «параметр» вдоль dir и перестраиваем b из новой точки
-    final tEnd = (b - startAxis).dx * dir.dx + (b - startAxis).dy * dir.dy;
-    b = aEdge + Offset(dir.dx * tEnd, dir.dy * tEnd);
-
-    d = b - aEdge;
-    len = d.distance;
-    if (len <= 0.0001) return b;
-    dir = Offset(d.dx / len, d.dy / len);
-  }
-   if (gridSnapOn && gridMm > 0) {
-   // проекция «как далеко ты тащишь» от внутренней кромки вдоль направления
-   final tAlong = (rawBMm - aEdge).dx * dir.dx + (rawBMm - aEdge).dy * dir.dy;
-   final snapped = (tAlong / gridMm).roundToDouble() * gridMm;
-   b = aEdge + dir * snapped; // теперь 2000, 2500 и т.п. будут ровно внутренними
-   }
-
-  // Дальше используем aEdge как фактическое начало новой стены
-  int bestIdx = -1;
-  double bestScore = -1e9;
-  double bestPmin = 0, bestPmax = 0, bestGap = 1e9, bestLen = 0;
-  bool   bestStartAtCorner = false;
-
-  for (int i=0;i<walls.length;i++) {
-    final w = walls[i];
-    final wv = w.b - w.a;
-    final wlen = wv.distance;
-    if (wlen == 0) continue;
-    final wdir = Offset(wv.dx / wlen, wv.dy / wlen);
-
-    final ang = _degBetween(dir, wdir);
-    if (ang > parallelTolDeg && (180-ang) > parallelTolDeg) continue;
-
-    final gapA = _distPointToLine(w.a, aEdge, dir);
-    final gapB = _distPointToLine(w.b, aEdge, dir);
-    final gap = math.min(gapA, gapB);
-    if (gap > snapParallelGapMm) continue;
-
-    final startNearCorner = (w.a - aEdge).distance <= (snapEndMm*1.5) ||
-                            (w.b - aEdge).distance <= (snapEndMm*1.5);
-
-    final p1 = (w.a - aEdge).dx * dir.dx + (w.a - aEdge).dy * dir.dy;
-    final p2 = (w.b - aEdge).dx * dir.dx + (w.b - aEdge).dy * dir.dy;
-    final pmin = math.min(p1, p2);
-    final pmax = math.max(p1, p2);
-
-    final score = (pmax - pmin) - gap * 0.02 + (startNearCorner? 500.0 : 0.0);
-    if (score > bestScore) {
-      bestScore = score;
-      bestIdx = i;
-      bestPmin = pmin;
-      bestPmax = pmax;
-      bestGap  = gap;
-      bestLen  = wlen;
-      bestStartAtCorner = startNearCorner;
-    }
   }
 
-  if (bestIdx >= 0) {
-    final tEnd = (b - aEdge).dx * dir.dx + (b - aEdge).dy * dir.dy;
+  static _EdgeSnapCandidate? _findEdgeSnap(
+    ui.Offset p,
+    List<WallSeg> walls,
+    double radius,
+  ) {
+    if (radius <= 0) return null;
 
-    double? snappedT;
-    final nearLeft  = (tEnd - bestPmin).abs() <= snapEdgeMm;
-    final nearRight = (tEnd - bestPmax).abs() <= snapEdgeMm;
-    if (nearLeft)  snappedT = bestPmin;
-    if (nearRight) snappedT = (snappedT==null || (tEnd - bestPmax).abs() < (tEnd - snappedT).abs())
-        ? bestPmax : snappedT;
+    double bestDist = radius;
+    _EdgeSnapCandidate? best;
 
-    if (snappedT==null && bestGap <= snapParallelGapMm * 0.8) {
-      final wantLen = bestLen;
-      final nearEqual = (tEnd - wantLen).abs() <= snapEdgeMm || bestStartAtCorner;
-      if (nearEqual) snappedT = wantLen;
-    }
-
-    if (snappedT != null) {
-      final snappedB = aEdge + Offset(dir.dx * snappedT, dir.dy * snappedT);
-      final escape = math.max(escapeFactor * snapEdgeMm, bestLen * 0.35);
-      if ((snappedB - rawBMm).distance <= escape) {
-        b = snappedB;
+    void consider(WallSeg w, {required bool left}) {
+      final shift = w.leftNormal * (w.thickMm / 2) * (left ? 1 : -1);
+      final edge = [w.a + shift, w.b + shift];
+      final closest = _closestPointOnSegment(p, edge[0], edge[1]);
+      final d = (p - closest).distance;
+      if (d < bestDist) {
+        bestDist = d;
+        best = _EdgeSnapCandidate(
+          axisPoint: closest - shift,
+          facePoint: closest,
+          distance: d,
+        );
       }
     }
+
+    for (final w in walls) {
+      consider(w, left: true);
+      consider(w, left: false);
+    }
+
+    return best;
   }
 
-  // финальная ортогональ и прихваты к вершинам после переноса начала на грань
-  b = axisSnap(aEdge, b, angTolDeg: 10);
-  Offset? vtxAfterAxis;
-  double best2 = snapEndMm + 1;
+  /// ---------------------------------------------------------
+  /// SNAP START — привязка к вершинам и краям стен
+  /// ---------------------------------------------------------
+  static SnapResult snapStart(
+    ui.Offset p,
+    List<WallSeg> walls,
+    SnapSettings s,
+  ) {
+    if (!s.enabled) return SnapResult(snapped: p);
+
+    ui.Offset? bestVertex;
+    double bestVertexDist = s.vertexRadiusMm;
+
+    for (final w in walls) {
+      for (final v in [w.a, w.b]) {
+        final d = (p - v).distance;
+        if (d < bestVertexDist) {
+          bestVertexDist = d;
+          bestVertex = v;
+        }
+      }
+    }
+
+    final edgeSnap = _findEdgeSnap(p, walls, s.vertexRadiusMm);
+
+    if (bestVertex != null &&
+        (edgeSnap == null || bestVertexDist <= edgeSnap.distance)) {
+      return SnapResult(
+        snapped: bestVertex,
+        hoverVertex: bestVertex,
+        mode: SnapMode.vertex,
+      );
+    }
+
+    if (edgeSnap != null) {
+      return SnapResult(
+        snapped: edgeSnap.axisPoint,
+        hoverVertex: edgeSnap.facePoint,
+        mode: SnapMode.edge,
+      );
+    }
+
+    return SnapResult(snapped: p);
+  }
+
+  /// ---------------------------------------------------------
+  /// SNAP DRAG — ортогональность + шаг + привязка к вершинам/краям
+  /// ---------------------------------------------------------
+  static SnapResult snapDrag(
+    ui.Offset start,
+    ui.Offset raw,
+    List<WallSeg> walls,
+    SnapSettings s,
+  ) {
+    if (!s.enabled) return SnapResult(snapped: raw);
+
+    ui.Offset p = raw;
+
+    final v = p - start;
+    double len = v.distance;
+    if (len < 0.1) return SnapResult(snapped: p);
+
+    double ang = math.atan2(v.dy, v.dx);
+
+    // -------------------------------------------------
+    // Ортогональность
+    // -------------------------------------------------
+    const axes = <double>[
+      0,
+      math.pi / 2,
+      math.pi,
+      3 * math.pi / 2,
+    ];
+
+    double bestAxis = ang;
+    double bestDelta = 999;
+
+    for (final ax in axes) {
+      final d = _angleDiffDeg(ang, ax);
+      if (d < s.orthoToleranceDeg && d < bestDelta) {
+        bestDelta = d;
+        bestAxis = ax;
+      }
+    }
+
+    if (bestDelta < 999) {
+      final dir = ui.Offset(math.cos(bestAxis), math.sin(bestAxis));
+      p = start + dir * len;
+    }
+
+    // перерасчёт
+    final v2 = p - start;
+    len = v2.distance;
+    if (len < 0.1) return SnapResult(snapped: p);
+
+    ui.Offset dir = v2 / len;
+
+    // -------------------------------------------------
+    // Шаг длины
+    // -------------------------------------------------
+    if (s.stepMm > 0) {
+      final snapped = (len / s.stepMm).roundToDouble() * s.stepMm;
+      len = snapped.abs();
+      p = start + dir * len;
+    }
+
+    // -------------------------------------------------
+    // Привязка к вершине / краю
+    // -------------------------------------------------
+    ui.Offset? bestV;
+    double bestVD = s.vertexRadiusMm;
+
+    for (final w in walls) {
+      for (final v in [w.a, w.b]) {
+        final d = (p - v).distance;
+        if (d < bestVD) {
+          bestVD = d;
+          bestV = v;
+        }
+      }
+    }
+
+    final edgeSnap = _findEdgeSnap(p, walls, s.vertexRadiusMm);
+
+    if (bestV != null &&
+        (edgeSnap == null || bestVD <= edgeSnap.distance)) {
+      return SnapResult(
+        snapped: bestV,
+        hoverVertex: bestV,
+        mode: SnapMode.vertex,
+      );
+    }
+
+    if (edgeSnap != null) {
+      return SnapResult(
+        snapped: edgeSnap.axisPoint,
+        hoverVertex: edgeSnap.facePoint,
+        mode: SnapMode.edge,
+      );
+    }
+
+    return SnapResult(
+      snapped: p,
+      mode: bestDelta < 999 ? SnapMode.axis : SnapMode.free,
+    );
+  }
+
+  /// ---------------------------------------------------------
+  /// Дубликаты стен (минимальная версия)
+  /// ---------------------------------------------------------
+  static bool isDuplicateSegment(
+    ui.Offset a,
+    ui.Offset b,
+    List<WallSeg> walls, {
+    double tolDistMm = 5,
+  }) {
+    final v = b - a;
+    final len = v.distance;
+    if (len < 1) return true;
+
+    for (final w in walls) {
+      final d1 = (w.a - a).distance;
+      final d2 = (w.b - b).distance;
+      final d3 = (w.a - b).distance;
+      final d4 = (w.b - a).distance;
+
+      if ((d1 <= tolDistMm && d2 <= tolDistMm) ||
+          (d3 <= tolDistMm && d4 <= tolDistMm)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+}
+
+class _EdgeSnapCandidate {
+  final ui.Offset axisPoint;
+  final ui.Offset facePoint;
+  final double distance;
+
+  const _EdgeSnapCandidate({
+    required this.axisPoint,
+    required this.facePoint,
+    required this.distance,
+  });
+}
+
+ui.Offset autoExtendFromCorner(
+  ui.Offset start,
+  ui.Offset world,
+  List<WallSeg> walls,
+) {
+  const tol = 2.0;
+
+  // ищем соседние точки
+  final neighbors = <ui.Offset>[];
+
   for (final w in walls) {
-    for (final v in [w.a, w.b]) {
-      if ((v - aEdge).distance <= 1e-6) continue;
-      final d2 = (v - b).distance;
-      if (d2 < best2) { best2 = d2; vtxAfterAxis = v; }
+    if ((w.a - start).distance < tol) neighbors.add(w.b);
+    if ((w.b - start).distance < tol) neighbors.add(w.a);
+  }
+
+  if (neighbors.isEmpty) return world;
+
+  final drag = world - start;
+  final dragLen = drag.distance;
+  if (dragLen < 0.001) return world;
+
+  final dragDir = drag / dragLen;
+
+  ui.Offset? bestDir;
+  double bestDot = -1e9;
+
+  for (final nb in neighbors) {
+    final v = nb - start;
+    final l = v.distance;
+    if (l < 0.001) continue;
+
+    final dir = v / l;
+    final dot = dragDir.dx * dir.dx + dragDir.dy * dir.dy;
+
+    if (dot > bestDot) {
+      bestDot = dot;
+      bestDir = dir;
     }
   }
-  if (vtxAfterAxis != null) return vtxAfterAxis!;
-  return b;
+
+  if (bestDir == null) return world;
+
+  final t = (world.dx - start.dx) * bestDir.dx +
+            (world.dy - start.dy) * bestDir.dy;
+
+  if (t <= 0) return world;
+
+  return ui.Offset(
+    start.dx + bestDir.dx * t,
+    start.dy + bestDir.dy * t,
+  );
 }

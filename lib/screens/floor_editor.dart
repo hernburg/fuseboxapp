@@ -1,6 +1,6 @@
 // lib/screens/floor_editor.dart
-import 'dart:ui' as ui;
 import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../floor/core/wall_model.dart';
 import '../floor/draw/wall_painter.dart';
@@ -10,56 +10,79 @@ import '../floor/rooms/room_detector.dart';
 
 class FloorEditor extends StatefulWidget {
   const FloorEditor({super.key});
+
   @override
   State<FloorEditor> createState() => _FloorEditorState();
 }
 
 enum Tool { pencil, marquee, hand }
-enum GuideMode { center, inner, outer }
 
 class _FloorEditorState extends State<FloorEditor> {
   // ---------- НАСТРОЙКИ ----------
   double _gridMm = 500;
-  bool _gridOn = true;
+  bool _gridOn = true; // сетка только фон
   bool _dimsOn = true;
-  bool _gridSnapOn = true;
+  bool _snapsOn = true; // включает/выключает все привязки
 
   double _thickMm = 120;
   double _heightMm = 2700;
   WallMaterial _mat = WallMaterial.concrete;
 
-  GuideMode _guideMode = GuideMode.center;
+  // шаг длины стены (0 = без шага)
+  double _stepMm = 100;
+
+  // радиусы привязок в мм
+  static const double _vertexSnapMm = 80; // к вершинам
+  // настройки привязки для Snapper
+  SnapSettings get _snapSettings => SnapSettings(
+        enabled: _snapsOn,
+        stepMm: _stepMm,
+        vertexRadiusMm: _vertexSnapMm,
+        // ортогональность ±3°
+        orthoToleranceDeg: 3,
+      );
 
   double _scale = 0.12;
-  Offset _panPx = Offset.zero;
+  ui.Offset _panPx = ui.Offset.zero;
   final EdgeInsets _pad = const EdgeInsets.all(80);
 
   // ---------- ДАННЫЕ ----------
   final List<WallSeg> _walls = [];
   final Set<int> _sel = {};
-  List<RoomRect> _rooms = [];
+  List<Room> _rooms = [];
 
   Tool _tool = Tool.pencil;
+
   bool _isDrawing = false;
   bool _isMarqueeing = false;
-  Offset? _dragStartMm;
-  Offset? _dragCurMm;
-  Rect? _marqueeWorld;
+
+  ui.Offset? _dragStartMm;
+  ui.Offset? _dragCurMm;
+
+  ui.Rect? _marqueeWorld;
+
   int? _hoverIndex;
+  ui.Offset? _hoverVertex; // подсвечиваемая вершина
 
   // ---------- ЖЕСТЫ ----------
   double _gestureScale0 = 1.0;
-  Offset? _gestureFocalPx0;
-  Offset? _gestureFocalWorld;
+  ui.Offset? _gestureFocalPx0;
+  ui.Offset? _gestureFocalWorld;
 
   // ---------- ИСТОРИЯ ----------
   final List<List<WallSeg>> _undoStack = [];
   final List<List<WallSeg>> _redoStack = [];
 
+  // =========================================================
+  //                       UNDO / REDO
+  // =========================================================
+
   void _saveState() {
     final snapshot = _walls.map((w) => w.copyWith()).toList();
     _undoStack.add(snapshot);
-    if (_undoStack.length > 50) _undoStack.removeAt(0);
+    if (_undoStack.length > 50) {
+      _undoStack.removeAt(0);
+    }
     _redoStack.clear();
   }
 
@@ -85,90 +108,41 @@ class _FloorEditorState extends State<FloorEditor> {
     setState(() {});
   }
 
-  // ---------- КООРДИНАТЫ ----------
-  Offset _px2mm(Offset px) =>
-      Offset((px.dx - _panPx.dx - _pad.left) / _scale,
-          (px.dy - _panPx.dy - _pad.top) / _scale);
+  // =========================================================
+  //                    КООРДИНАТЫ / ROOMS
+  // =========================================================
 
-  void _recalcRooms() => _rooms = detectRectRooms(_walls);
-
-  // ---------- ПРИВЯЗКА (пока только к сетке / простые хелперы) ----------
-  Offset _snapToGrid(Offset pMm, double stepMm) {
-    return Offset(
-      (pMm.dx / stepMm).roundToDouble() * stepMm,
-      (pMm.dy / stepMm).roundToDouble() * stepMm,
-    );
-  }
-
-  Offset _snapIfNearGrid(Offset pMm, {double tolMm = 50}) {
-    final gx = (pMm.dx / _gridMm).roundToDouble() * _gridMm;
-    final gy = (pMm.dy / _gridMm).roundToDouble() * _gridMm;
-
-    final dx = (gx - pMm.dx).abs();
-    final dy = (gy - pMm.dy).abs();
-
-    // если близко — прилипаем, иначе оставляем как есть
-    return Offset(
-      dx <= tolMm ? gx : pMm.dx,
-      dy <= tolMm ? gy : pMm.dy,
-    );
-  }
-
-  Offset? _snapToWallAxis(Offset pMm, {double maxDistMm = 60}) {
-    Offset? best;
-    double bestDist = maxDistMm;
-
-    for (final w in _walls) {
-      final ab = w.b - w.a;
-      final len = ab.distance;
-      if (len < 1e-6) continue;
-
-      final t = ((pMm.dx - w.a.dx) * ab.dx +
-              (pMm.dy - w.a.dy) * ab.dy) /
-          (len * len);
-
-      final tClamped = t.clamp(0.0, 1.0);
-      final proj = Offset(
-        w.a.dx + ab.dx * tClamped,
-        w.a.dy + ab.dy * tClamped,
+  ui.Offset _px2mm(ui.Offset px) => ui.Offset(
+        (px.dx - _panPx.dx - _pad.left) / _scale,
+        (px.dy - _panPx.dy - _pad.top) / _scale,
       );
 
-      final dist = (pMm - proj).distance;
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = proj;
-      }
-    }
-
-    return best;
+  void _recalcRooms() {
+    _rooms = detectRooms(_walls);
   }
 
-  Offset guidePoint(WallSeg w, Offset axisPoint, GuideMode mode) {
-    final dir = w.dir;
-    final n = Offset(-dir.dy, dir.dx);
-    final half = w.thickMm / 2;
+  // =========================================================
+  //                      СТЕНЫ
+  // =========================================================
 
-    switch (mode) {
-      case GuideMode.center:
-        return axisPoint;
-      case GuideMode.inner:
-        return axisPoint + n * half;
-      case GuideMode.outer:
-        return axisPoint - n * half;
-    }
-  }
-
-  // ---------- СТЕНЫ ----------
-  void _addWall(Offset aMm, Offset bMm) {
+  void _addWall(ui.Offset aMm, ui.Offset bMm) {
     if ((bMm - aMm).distance < 1) return;
+
+    // защита от дубликатов/наложений – в Snapper
+    if (Snapper.isDuplicateSegment(aMm, bMm, _walls)) {
+      return;
+    }
+
     _saveState();
-    _walls.add(WallSeg(
-      a: aMm,
-      b: bMm,
-      thickMm: _thickMm,
-      heightMm: _heightMm,
-      material: _mat,
-    ));
+    insertWallSmart(_walls,
+    WallSeg(
+        a:aMm,
+        b:bMm,
+        thickMm: _thickMm,
+        heightMm: _heightMm,
+        material: _mat,
+     ),
+    );
     _recalcRooms();
     setState(() {});
   }
@@ -202,44 +176,64 @@ class _FloorEditorState extends State<FloorEditor> {
     setState(() {});
   }
 
-  // ---------- РИСОВАНИЕ ----------
-  void _handleDrawStart(Offset localPx) {
-    if (_tool != Tool.pencil) return;
+  // =========================================================
+  //                    РИСОВАНИЕ СТЕН
+  // =========================================================
 
-    Offset p = _px2mm(localPx);
+  void _handleDrawStart(ui.Offset localPx) {
+   if (_tool != Tool.pencil) return;
 
-    if (_gridSnapOn) {
-      p = _snapIfNearGrid(p);
+   final world = _px2mm(localPx);
+
+   // Snapper сам решает: если попали в ребро — смещает к краю,
+   // если в вершину — цепляет вершину.
+   final res = Snapper.snapStart(world, _walls, _snapSettings);
+
+   _dragStartMm = res.snapped;
+   _dragCurMm = res.snapped;
+   _hoverVertex = res.hoverVertex;
+   _isDrawing = true;
+   setState(() {});
+ }
+
+void _handleDrawUpdate(ui.Offset localPx) {
+  if (!_isDrawing || _dragStartMm == null) return;
+
+  final start = _dragStartMm!;
+  final world = _px2mm(localPx);
+
+  // Ищем ТОЛЬКО вершины, НЕ края стен
+  ui.Offset? hv;
+  for (final w in _walls) {
+    for (final v in [w.a, w.b]) {
+      if ((world - v).distance < _snapSettings.vertexRadiusMm) {
+        hv = v;
+        break;
+      }
     }
-
-    final axis = _snapToWallAxis(p);
-    if (axis != null) {
-      p = axis;
-    }
-
-    _dragStartMm = p;
-    _dragCurMm = p;
-    _isDrawing = true;
-    setState(() {});
   }
 
-  void _handleDrawUpdate(Offset localPx) {
-    if (!_isDrawing || _dragStartMm == null) return;
+  // 1) Берём «p» без авто-снаппинга
+  ui.Offset p = world;
 
-    Offset p = _px2mm(localPx);
-
-    if (_gridSnapOn) {
-      p = _snapIfNearGrid(p);
-    }
-
-    final axis = _snapToWallAxis(p);
-    if (axis != null) {
-      p = axis;
-    }
-
-    _dragCurMm = p;
-    setState(() {});
+  // 2) Продление стены ТОЛЬКО если старт сам является вершиной
+  if (hv != null && (start - hv).distance < 0.5) {
+    p = autoExtendFromCorner(start, world, _walls);
   }
+
+  // 3) Закрытие контура ТОЛЬКО если тянемся к той же вершине
+  if (hv != null && (p - hv).distance < 120) {
+    p = hv;
+  }
+
+  // 4) Окончательный snap — ТОЛЬКО snapDrag, без остальных
+  final res = Snapper.snapDrag(start, p, _walls, _snapSettings);
+
+  _dragCurMm = res.snapped;
+  _hoverVertex = res.hoverVertex ?? hv;
+
+  setState(() {});
+}
 
   void _handleDrawEnd() {
     if (_dragStartMm != null && _dragCurMm != null) {
@@ -248,10 +242,14 @@ class _FloorEditorState extends State<FloorEditor> {
     _isDrawing = false;
     _dragStartMm = null;
     _dragCurMm = null;
+    _hoverVertex = null;
     setState(() {});
   }
 
-  // ---------- UI ----------
+  // =========================================================
+  //                     UI / GESTURES
+  // =========================================================
+
   @override
   Widget build(BuildContext context) {
     final toolbar = _buildToolbar(context);
@@ -290,40 +288,73 @@ class _FloorEditorState extends State<FloorEditor> {
         if (d.pointerCount == 1 && _tool == Tool.marquee) {
           _isMarqueeing = true;
           final w = _px2mm(d.localFocalPoint);
-          _marqueeWorld = Rect.fromPoints(w, w);
+          _marqueeWorld = ui.Rect.fromPoints(w, w);
           setState(() {});
         }
       },
       onScaleUpdate: (d) {
         final now = d.localFocalPoint;
+
+        // мультитач → масштаб/пан
         if (d.pointerCount > 1) {
           final worldFocal = _gestureFocalWorld ?? _px2mm(now);
           setState(() {
             _scale = (_gestureScale0 * d.scale).clamp(
-                MediaQuery.of(context).size.width / 100000,
-                MediaQuery.of(context).size.width / 5);
+              MediaQuery.of(context).size.width / 100000,
+              MediaQuery.of(context).size.width / 5,
+            );
             _panPx = now -
-                Offset(worldFocal.dx * _scale + _pad.left,
-                    worldFocal.dy * _scale + _pad.top);
+                ui.Offset(
+                  worldFocal.dx * _scale + _pad.left,
+                  worldFocal.dy * _scale + _pad.top,
+                );
           });
           return;
         }
 
-        if (_isDrawing && _tool == Tool.pencil) _handleDrawUpdate(now);
+        // одиночный палец
+        if (_tool == Tool.hand) {
+          // панорамирование
+          if (_gestureFocalPx0 != null) {
+            final delta = now - _gestureFocalPx0!;
+            setState(() {
+              _panPx += delta;
+              _gestureFocalPx0 = now;
+            });
+          }
+          return;
+        }
+
+        if (_isDrawing && _tool == Tool.pencil) {
+          _handleDrawUpdate(now);
+          return;
+        }
+
         if (_isMarqueeing && _marqueeWorld != null) {
           final w = _px2mm(now);
-          final raw = Rect.fromPoints(_marqueeWorld!.topLeft, w);
-          _marqueeWorld = Rect.fromLTRB(
+          final raw = ui.Rect.fromPoints(_marqueeWorld!.topLeft, w);
+          _marqueeWorld = ui.Rect.fromLTRB(
             min(raw.left, raw.right),
             min(raw.top, raw.bottom),
             max(raw.left, raw.right),
             max(raw.top, raw.bottom),
           );
           setState(() {});
+          return;
+        }
+
+        // просто ведём пальцем в режиме карандаша — подсветка ближайшей вершины
+        if (_tool == Tool.pencil && !_isDrawing && !_isMarqueeing) {
+          final world = _px2mm(now);
+          final res = Snapper.snapStart(world, _walls, _snapSettings);
+          setState(() {
+            _hoverVertex = res.hoverVertex;
+          });
         }
       },
       onScaleEnd: (_) {
         if (_isDrawing) _handleDrawEnd();
+
         if (_isMarqueeing && _marqueeWorld != null) {
           final picked = marqueePick(_walls, _marqueeWorld!);
           _sel
@@ -332,12 +363,17 @@ class _FloorEditorState extends State<FloorEditor> {
           _marqueeWorld = null;
           setState(() {});
         }
-        _isDrawing = _isMarqueeing = false;
+
+        _isDrawing = false;
+        _isMarqueeing = false;
+        _gestureFocalPx0 = null;
+        _gestureFocalWorld = null;
       },
       child: RepaintBoundary(
         child: CustomPaint(
           painter: WallPainter(
             walls: _walls,
+            rooms: _rooms,
             k: _scale,
             panPx: _panPx,
             pad: _pad,
@@ -346,11 +382,11 @@ class _FloorEditorState extends State<FloorEditor> {
             dragA: _dragStartMm,
             dragB: _dragCurMm,
             previewThickMm: _thickMm,
-            showDims: _dimsOn,
+            showDims:  _dimsOn,
             marqueeWorld: _marqueeWorld,
             selected: _sel,
             hoverIndex: _hoverIndex,
-            rooms: _rooms, 
+            hoverVertex: _hoverVertex,
           ),
           child: const SizedBox.expand(),
         ),
@@ -387,7 +423,8 @@ class _FloorEditorState extends State<FloorEditor> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              'Помещений: ${_rooms.length} • ${_rooms.map((r) => r.areaM2).fold<double>(0, (s, a) => s + a).toStringAsFixed(2)} м²',
+              'Помещений: ${_rooms.length} • '
+              '${_rooms.map((r) => r.areaM2).fold<double>(0, (s, a) => s + a).toStringAsFixed(2)} м²',
               style: const TextStyle(fontSize: 12),
             ),
           ),
@@ -396,7 +433,8 @@ class _FloorEditorState extends State<FloorEditor> {
   }
 
   // ---------- ВЕРХНЯЯ ПАНЕЛЬ ----------
-  Widget _buildToolbarContainer(BuildContext context, Widget child) {
+  Widget _buildToolbarContainer(
+      BuildContext context, Widget child) {
     return Container(
       padding:
           const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -431,29 +469,32 @@ class _FloorEditorState extends State<FloorEditor> {
           child: Row(
             children: [
               _toolButton(Icons.edit, 'Карандаш',
-                  _tool == Tool.pencil,
-                  () => setState(() => _tool = Tool.pencil)),
+                  _tool == Tool.pencil, () {
+                setState(() => _tool = Tool.pencil);
+              }),
               const SizedBox(width: 8),
               _toolButton(Icons.crop_free, 'Область',
-                  _tool == Tool.marquee,
-                  () => setState(() => _tool = Tool.marquee)),
+                  _tool == Tool.marquee, () {
+                setState(() => _tool = Tool.marquee);
+              }),
               const SizedBox(width: 8),
               _toolButton(Icons.pan_tool_alt, 'Рука',
-                  _tool == Tool.hand,
-                  () => setState(() => _tool = Tool.hand)),
+                  _tool == Tool.hand, () {
+                setState(() => _tool = Tool.hand);
+              }),
               const SizedBox(width: 12),
+              FilterChip(
+                label: const Text('Привязки'),
+                selected: _snapsOn,
+                onSelected: (_) =>
+                    setState(() => _snapsOn = !_snapsOn),
+              ),
+              const SizedBox(width: 8),
               FilterChip(
                 label: const Text('Сетка'),
                 selected: _gridOn,
                 onSelected: (_) =>
                     setState(() => _gridOn = !_gridOn),
-              ),
-              const SizedBox(width: 8),
-              FilterChip(
-                label: const Text('Привязка'),
-                selected: _gridSnapOn,
-                onSelected: (_) =>
-                    setState(() => _gridSnapOn = !_gridSnapOn),
               ),
               const SizedBox(width: 8),
               FilterChip(
@@ -463,27 +504,14 @@ class _FloorEditorState extends State<FloorEditor> {
                     setState(() => _dimsOn = !_dimsOn),
               ),
               const SizedBox(width: 8),
-              DropdownButton<GuideMode>(
-                value: _guideMode,
-                onChanged: (v) {
-                  if (v != null) {
-                    setState(() => _guideMode = v);
-                  }
-                },
-                items: const [
-                  DropdownMenuItem(
-                    value: GuideMode.center,
-                    child: Text('Напр. по центру'),
-                  ),
-                  DropdownMenuItem(
-                    value: GuideMode.inner,
-                    child: Text('Напр. внутренняя'),
-                  ),
-                  DropdownMenuItem(
-                    value: GuideMode.outer,
-                    child: Text('Напр. внешняя'),
-                  ),
-                ],
+              OutlinedButton.icon(
+                onPressed: () => _pickStep(context),
+                icon: const Icon(Icons.straighten, size: 18),
+                label: Text(
+                  _stepMm <= 0
+                      ? 'Шаг: —'
+                      : 'Шаг: ${_stepMm.toStringAsFixed(0)} мм',
+                ),
               ),
               const SizedBox(width: 8),
               ElevatedButton.icon(
@@ -497,7 +525,7 @@ class _FloorEditorState extends State<FloorEditor> {
         ),
         const SizedBox(height: 8),
 
-        // параметры
+        // параметры стен / сетки
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
@@ -511,8 +539,11 @@ class _FloorEditorState extends State<FloorEditor> {
                   min: 50,
                   max: 500,
                   step: 10,
-                ).then((v) =>
-                    v != null ? setState(() => _thickMm = v) : null),
+                ).then((v) {
+                  if (v != null) {
+                    setState(() => _thickMm = v);
+                  }
+                }),
                 icon: const Icon(Icons.straighten),
                 label: Text(
                     'Толщина ${_thickMm.toStringAsFixed(0)} мм'),
@@ -527,8 +558,11 @@ class _FloorEditorState extends State<FloorEditor> {
                   min: 1000,
                   max: 4000,
                   step: 50,
-                ).then((v) =>
-                    v != null ? setState(() => _heightMm = v) : null),
+                ).then((v) {
+                  if (v != null) {
+                    setState(() => _heightMm = v);
+                  }
+                }),
                 icon: const Icon(Icons.unfold_more),
                 label: Text(
                     'Высота ${_heightMm.toStringAsFixed(0)} мм'),
@@ -543,14 +577,17 @@ class _FloorEditorState extends State<FloorEditor> {
               OutlinedButton.icon(
                 onPressed: () => _pickNumber(
                   context,
-                  title: 'Шаг сетки',
+                  title: 'Шаг сетки (фон)',
                   current: _gridMm,
                   unit: 'мм',
                   min: 50,
                   max: 2000,
                   step: 50,
-                ).then((v) =>
-                    v != null ? setState(() => _gridMm = v) : null),
+                ).then((v) {
+                  if (v != null) {
+                    setState(() => _gridMm = v);
+                  }
+                }),
                 icon: const Icon(Icons.grid_on),
                 label: Text(
                     'Сетка ${_gridMm.toStringAsFixed(0)} мм'),
@@ -576,7 +613,11 @@ class _FloorEditorState extends State<FloorEditor> {
   }
 
   Widget _toolButton(
-      IconData icon, String label, bool active, VoidCallback onTap) {
+    IconData icon,
+    String label,
+    bool active,
+    VoidCallback onTap,
+  ) {
     return ChoiceChip(
       selected: active,
       onSelected: (_) => onTap(),
@@ -585,7 +626,8 @@ class _FloorEditorState extends State<FloorEditor> {
     );
   }
 
-  // ---------- диалог выбора ----------
+  // ---------- диалоги ----------
+
   Future<double?> _pickNumber(
     BuildContext ctx, {
     required String title,
@@ -613,8 +655,7 @@ class _FloorEditorState extends State<FloorEditor> {
                     divisions:
                         ((max - min) ~/ step).clamp(1, 1000),
                     value: tmp,
-                    onChanged: (v) =>
-                        ss(() => tmp = v),
+                    onChanged: (v) => ss(() => tmp = v),
                   ),
                 ],
               );
@@ -622,15 +663,61 @@ class _FloorEditorState extends State<FloorEditor> {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(c),
-                child: const Text('Отмена')),
+              onPressed: () => Navigator.pop(c),
+              child: const Text('Отмена'),
+            ),
             ElevatedButton(
-                onPressed: () => Navigator.pop(c, tmp),
-                child: const Text('ОК')),
+              onPressed: () => Navigator.pop(c, tmp),
+              child: const Text('ОК'),
+            ),
           ],
         );
       },
     );
+  }
+
+  Future<void> _pickStep(BuildContext ctx) async {
+    final values = <double>[0, 10, 50, 100, 200, 500, 1000];
+    final labels = <double, String>{
+      0: 'Без шага',
+      10: '10 мм',
+      50: '50 мм',
+      100: '100 мм',
+      200: '200 мм',
+      500: '500 мм',
+      1000: '1000 мм',
+    };
+
+    final picked = await showDialog<double>(
+      context: ctx,
+      builder: (c) {
+        return AlertDialog(
+          title: const Text('Шаг построения'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final v in values)
+                RadioListTile<double>(
+                  value: v,
+                  groupValue: _stepMm,
+                  onChanged: (x) => Navigator.pop(c, x),
+                  title: Text(labels[v]!),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c),
+              child: const Text('Отмена'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() => _stepMm = picked);
+    }
   }
 
   Future<void> _pickMaterial(BuildContext ctx) async {
@@ -668,16 +755,14 @@ class _FloorEditorState extends State<FloorEditor> {
                     groupValue: _mat,
                     onChanged: (v) =>
                         Navigator.pop(c, v),
-                    title:
-                        Text(mapNames[m] ?? m.name),
+                    title: Text(mapNames[m] ?? m.name),
                   ),
               ],
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () =>
-                  Navigator.pop(c),
+              onPressed: () => Navigator.pop(c),
               child: const Text('Отмена'),
             ),
           ],

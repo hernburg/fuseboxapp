@@ -1,7 +1,6 @@
 // lib/api/calc_api.dart
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
 
 /// Безопасный клиент: пытается сходить на CALC_URL, а если не вышло —

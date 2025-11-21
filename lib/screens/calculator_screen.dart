@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/material.dart';
 
 class CalculatorScreen extends StatefulWidget {
   const CalculatorScreen({super.key});
@@ -237,7 +236,6 @@ class _KeyButton extends StatelessWidget {
   final VoidCallback onTap;
 
   const _KeyButton({
-    super.key,
     required this.label,
     required this.width,
     required this.height,
