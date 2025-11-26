@@ -120,7 +120,7 @@ class _PreviewPainter extends CustomPainter {
       c.drawPath(
         p,
         Paint()
-          ..color = Colors.white.withOpacity(.9)
+          ..color = Colors.white.withValues(alpha: .9)
           ..strokeWidth = 2
           ..style = PaintingStyle.stroke,
       );
@@ -155,9 +155,15 @@ class _PreviewPainter extends CustomPainter {
       maxY = math.max(maxY, o.dy);
     }
 
-    for (final w in walls) acc(w);
-    for (final o in openings) acc(o.at);
-    for (final p in points) acc(p.at);
+    for (final w in walls) {
+      acc(w);
+    }
+    for (final o in openings) {
+      acc(o.at);
+    }
+    for (final p in points) {
+      acc(p.at);
+    }
 
     if (!minX.isFinite || minX == maxX || minY == maxY) {
       // защитимся от вырожденных случаев

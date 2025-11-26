@@ -69,10 +69,12 @@ class _ProjectEditorState extends State<ProjectEditor> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
+    return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
         _save();
-        return true;
+        if (!didPop && context.mounted) {
+          Navigator.of(context).pop();
+        }
       },
       child: Scaffold(
         appBar: AppBar(
@@ -139,7 +141,7 @@ class _ProjectEditorState extends State<ProjectEditor> {
                               ),
                             );
 
-                            if (!mounted) return;
+                            if (!context.mounted) return;
                             setState(() => _busy = false);
 
                             if (result == null) {
@@ -236,7 +238,7 @@ class _ProjectEditorState extends State<ProjectEditor> {
               alignment: Alignment.centerLeft,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
+                  color: Colors.white.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Colors.white12),
                 ),

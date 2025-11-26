@@ -50,7 +50,7 @@ class FuseboardPainter extends CustomPainter {
     final railsTop = margin + 46;
     final railsCount = 3;
     final railPaint = Paint()
-      ..color = Colors.black.withOpacity(.35)
+      ..color = Colors.black.withValues(alpha: .35)
       ..strokeWidth = 2;
     for (int r = 0; r < railsCount; r++) {
       final y = railsTop + r * railGap;
@@ -92,7 +92,7 @@ class FuseboardPainter extends CustomPainter {
       drawDevice(x, y, modules, label: label, color: color);
 
       final wire = Paint()
-        ..color = Colors.redAccent.withOpacity(.8)
+        ..color = Colors.redAccent.withValues(alpha: .8)
         ..strokeWidth = 2;
       final anchorY = y + modH / 2;
       canvas.drawLine(Offset(busX + 3, anchorY), Offset(x - 6, anchorY), wire);

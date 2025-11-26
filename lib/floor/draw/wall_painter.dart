@@ -1,302 +1,248 @@
-// lib/floor/draw/wall_painter.dart
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-
 import '../core/wall_model.dart';
-import '../rooms/room_detector.dart';
+
+class WallDebugOverlay {
+  final ui.Offset? snapPoint;
+  final ui.Offset? offsetPoint;
+  final ui.Offset? baseNormalOrigin;
+  final ui.Offset? baseNormalVector;
+  final ui.Offset? newNormalOrigin;
+  final ui.Offset? newNormalVector;
+
+  const WallDebugOverlay({
+    this.snapPoint,
+    this.offsetPoint,
+    this.baseNormalOrigin,
+    this.baseNormalVector,
+    this.newNormalOrigin,
+    this.newNormalVector,
+  });
+
+  static const empty = WallDebugOverlay();
+}
 
 class WallPainter extends CustomPainter {
   final List<WallSeg> walls;
-  final List<Room> rooms;
-
-  final double k;                
-  final ui.Offset panPx;         
+  final double k;        // масштаб
+  final ui.Offset panPx;
   final EdgeInsets pad;
-
-  final double gridMm;
-  final bool gridOn;
-
-  final ui.Offset? dragA;
-  final ui.Offset? dragB;
-  final double previewThickMm;
-
-  final bool showDims;
-
-  final ui.Rect? marqueeWorld;
-  final Set<int> selected;
-
-  final int? hoverIndex;
-  final ui.Offset? hoverVertex;
+  final bool debugMode;
+  final WallDebugOverlay debugOverlay;
+  final ui.Offset? highlightCorner;
 
   WallPainter({
     required this.walls,
-    required this.rooms,
     required this.k,
     required this.panPx,
     required this.pad,
-    required this.gridMm,
-    required this.gridOn,
-    required this.dragA,
-    required this.dragB,
-    required this.previewThickMm,
-    required this.showDims,
-    required this.marqueeWorld,
-    required this.selected,
-    required this.hoverIndex,
-    required this.hoverVertex,
-  });
-
-  // -------------------------------------------------------------
-  //                     COORDINATES
-  // -------------------------------------------------------------
-
-  ui.Offset _mm2px(ui.Offset mm) => ui.Offset(
-        mm.dx * k + panPx.dx + pad.left,
-        mm.dy * k + panPx.dy + pad.top,
-      );
+    this.debugMode = false,
+    WallDebugOverlay? debugOverlay,
+    this.highlightCorner,
+  }) : debugOverlay = debugOverlay ?? WallDebugOverlay.empty;
 
   @override
   void paint(Canvas canvas, Size size) {
-    _paintBackground(canvas, size);
-    _paintRooms(canvas);
-    _paintWalls(canvas);
-    _paintDragPreview(canvas);
-    _paintMarquee(canvas);
-    _paintVertexHover(canvas);
-  }
+    canvas.save();
 
-  // -------------------------------------------------------------
-  //                     GRID / BACKGROUND
-  // -------------------------------------------------------------
+    // трансформация
+    canvas.translate(panPx.dx + pad.left, panPx.dy + pad.top);
+    canvas.scale(k);
 
-  void _paintBackground(Canvas canvas, Size size) {
-    if (!gridOn) return;
-
-    final paint = Paint()
-      ..color = Colors.white.withOpacity(0.05)
-      ..strokeWidth = 1;
-
-    final stepPx = gridMm * k;
-    if (stepPx < 4) return;
-
-    for (double x = (panPx.dx + pad.left) % stepPx;
-        x < size.width;
-        x += stepPx) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    _drawBackground(canvas, size);
+    _drawWalls(canvas);
+    if (debugMode) {
+      _drawDebugOverlay(canvas);
     }
 
-    for (double y = (panPx.dy + pad.top) % stepPx;
-        y < size.height;
-        y += stepPx) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
-  }
+    canvas.restore();
 
-  // -------------------------------------------------------------
-  //                      ROOMS
-  // -------------------------------------------------------------
+    if (highlightCorner != null) {
+      final px = _toPx(highlightCorner!, panPx, k, pad);
+      final fill = Paint()
+        ..color = Colors.amberAccent
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(px, 10, fill);
 
-  void _paintRooms(Canvas canvas) {
-    if (rooms.isEmpty) return;
-
-    final fill = Paint()
-      ..color = const Color(0xFF3C7E7B).withOpacity(0.55)
-      ..style = PaintingStyle.fill;
-
-    final stroke = Paint()
-      ..color = Colors.white.withOpacity(0.12)
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-
-    final textStyle = const TextStyle(
-      fontSize: 14,
-      color: Colors.white,
-    );
-
-    for (final room in rooms) {
-      if (room.outer.length < 3) continue;
-
-      final path = Path()..fillType = PathFillType.evenOdd;
-
-      // outer contour
-      final p0 = _mm2px(room.outer.first);
-      path.moveTo(p0.dx, p0.dy);
-      for (int i = 1; i < room.outer.length; i++) {
-        final p = _mm2px(room.outer[i]);
-        path.lineTo(p.dx, p.dy);
-      }
-      path.close();
-
-      // holes
-      for (final hole in room.holes) {
-        if (hole.length < 3) continue;
-        final h0 = _mm2px(hole.first);
-        path.moveTo(h0.dx, h0.dy);
-        for (int i = 1; i < hole.length; i++) {
-          final p = _mm2px(hole[i]);
-          path.lineTo(p.dx, p.dy);
-        }
-        path.close();
-      }
-
-      canvas.drawPath(path, fill);
-      canvas.drawPath(path, stroke);
-
-      // area label
-      final centerPx = _mm2px(room.centerMm);
-      final tp = TextPainter(
-        text: TextSpan(
-          text: '${room.areaM2.toStringAsFixed(2)} м²',
-          style: textStyle,
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-
-      tp.paint(
-        canvas,
-        centerPx - ui.Offset(tp.width / 2, tp.height / 2),
+      canvas.drawCircle(
+        px,
+        10,
+        Paint()
+          ..color = Colors.black
+          ..strokeWidth = 2
+          ..style = PaintingStyle.stroke,
       );
     }
   }
 
   // -------------------------------------------------------------
-  //                      WALLS
+  //  СЕТКА / ФОН
   // -------------------------------------------------------------
+  void _drawBackground(Canvas c, Size s) {
+    final bg = Paint()
+      ..color = const Color(0xFF2F3542); // мягкий тёмный фон
 
-  void _paintWalls(Canvas canvas) {
-    final paintFill = Paint()
-      ..color = const Color(0xFF44474F)
-      ..style = PaintingStyle.fill;
+    c.drawRect(
+      Rect.fromLTWH(-50000, -50000, 100000, 100000),
+      bg,
+    );
 
-    final paintStroke = Paint()
-      ..color = Colors.black.withOpacity(0.9)
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
+    final gridPaint = Paint()
+      ..color = const Color(0x22FFFFFF)
+      ..strokeWidth = 1;
 
-    final selFill = Paint()
-      ..color = const Color(0xFF5C8DF6)
-      ..style = PaintingStyle.fill;
-
-    for (int i = 0; i < walls.length; i++) {
-      final w = walls[i];
-      final verts = wallEdges(w).map(_mm2px).toList();
-
-      final path = Path()..addPolygon(verts, true);
-
-      canvas.drawPath(path, selected.contains(i) ? selFill : paintFill);
-      canvas.drawPath(path, paintStroke);
-
-      // размеры пока отключены
+    const step = 500.0;
+    for (double x = -50000; x <= 50000; x += step) {
+      c.drawLine(Offset(x, -50000), Offset(x, 50000), gridPaint);
+    }
+    for (double y = -50000; y <= 50000; y += step) {
+      c.drawLine(Offset(-50000, y), Offset(50000, y), gridPaint);
     }
   }
 
-   // -------------------------------------------------------------
-  //             DRAG WALL PREVIEW
   // -------------------------------------------------------------
+  //  ТОЛСТЫЕ СТЕНЫ
+  // -------------------------------------------------------------
+  void _drawWalls(Canvas c) {
+    for (var i = 0; i < walls.length; i++) {
+      _drawWall(c, walls[i], i);
+    }
+  }
 
-  void _paintDragPreview(Canvas canvas) {
-    if (dragA == null || dragB == null) return;
+  void _drawWall(Canvas canvas, WallSeg wall, int index) {
+    final quad = wall.quad;
 
-    final tmp = WallSeg(a: dragA, b: dragB, thickMm: previewThickMm);
-    final verts = wallEdges(tmp).map(_mm2px).toList();
+    final pA = worldToScreen(quad[0]);
+    final pB = worldToScreen(quad[1]);
+    final pC = worldToScreen(quad[2]);
+    final pD = worldToScreen(quad[3]);
 
-    final fill = Paint()
-      ..color = Colors.blueAccent.withOpacity(0.25)
-      ..style = PaintingStyle.fill;
+    // --- рисуем саму стену ---
+    final path = Path()
+      ..moveTo(pA.dx, pA.dy)
+      ..lineTo(pB.dx, pB.dy)
+      ..lineTo(pC.dx, pC.dy)
+      ..lineTo(pD.dx, pD.dy)
+      ..close();
 
-    final stroke = Paint()
-      ..color = Colors.blueAccent
-      ..strokeWidth = 1.2
-      ..style = PaintingStyle.stroke;
+    canvas.drawPath(path, wallFillPaintFor(wall));
+    canvas.drawPath(path, wallStrokePaint);
 
-    final path = Path()..addPolygon(verts, true);
+    // --- подписи углов ---
+    _drawLabel(canvas, "a", pA + const Offset(-8, 12));
+    _drawLabel(canvas, "b", pB + const Offset(-8, -12));
+    _drawLabel(canvas, "c", pC + const Offset(8, -12));
+    _drawLabel(canvas, "d", pD + const Offset(8, 12));
 
-    canvas.drawPath(path, fill);
-    canvas.drawPath(path, stroke);
+    // --- подписи сторон с индексом стены ---
+    final idx = "_$index";
 
-    // preview length
+    _drawLabel(canvas, "X1$idx", _mid(pA, pB) + const Offset(-6, 0));
+    _drawLabel(canvas, "Y1$idx", _mid(pB, pC) + const Offset(0, -6));
+    _drawLabel(canvas, "X2$idx", _mid(pD, pC) + const Offset(6, 0));
+    _drawLabel(canvas, "Y2$idx", _mid(pA, pD) + const Offset(0, 6));
+  }
+
+  Offset worldToScreen(Offset p) => p;
+
+  ui.Offset _toPx(
+    ui.Offset world,
+    ui.Offset pan,
+    double scale,
+    EdgeInsets padding,
+  ) {
+    return ui.Offset(
+      world.dx * scale + pan.dx + padding.left,
+      world.dy * scale + pan.dy + padding.top,
+    );
+  }
+
+  Paint wallFillPaintFor(WallSeg wall) => Paint()
+    ..color = const Color(0xFFDEE2E6).withOpacity(0.45)
+    ..style = PaintingStyle.fill;
+
+  Paint get wallStrokePaint => Paint()
+    ..color = const Color(0xFFADB5BD)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.5;
+
+  Offset _mid(Offset a, Offset b) => Offset((a.dx + b.dx) / 2, (a.dy + b.dy) / 2);
+
+  void _drawLabel(Canvas canvas, String text, Offset pos) {
     final tp = TextPainter(
       text: TextSpan(
-        text: '${tmp.lengthMm.round()} мм',
-        style: const TextStyle(color: Colors.white, fontSize: 12),
+        text: text,
+        style: const TextStyle(
+          color: Colors.orange,
+          fontSize: 25,
+        ),
       ),
       textDirection: TextDirection.ltr,
-    )..layout();
-
-    final centerPx = _mm2px(tmp.centerMm);
-    final rect = Rect.fromCenter(
-      center: centerPx,
-      width: tp.width + 8,
-      height: tp.height + 4,
     );
-
-    canvas.drawRect(rect, Paint()..color = Colors.black.withOpacity(0.4));
-    tp.paint(canvas, rect.topLeft + const Offset(4, 2));
+    tp.layout();
+    tp.paint(canvas, pos);
   }
 
-  // -------------------------------------------------------------
-  //                      MARQUEE
-  // -------------------------------------------------------------
+  void _drawDebugOverlay(Canvas c) {
+    const normalLen = 600.0;
+    final stroke = 4 / k;
 
-  void _paintMarquee(Canvas canvas) {
-    if (marqueeWorld == null) return;
+    final basePaint = Paint()
+      ..color = Colors.orangeAccent
+      ..strokeWidth = stroke;
 
-    final p1 = _mm2px(marqueeWorld!.topLeft);
-    final p2 = _mm2px(marqueeWorld!.bottomRight);
+    final newPaint = Paint()
+      ..color = Colors.lightBlueAccent
+      ..strokeWidth = stroke;
 
-    final r = Rect.fromPoints(p1, p2);
+    if (debugOverlay.baseNormalOrigin != null &&
+        debugOverlay.baseNormalVector != null) {
+      final a = debugOverlay.baseNormalOrigin!;
+      final vec = debugOverlay.baseNormalVector!;
+      final len = vec.distance;
+      final dir = len < 1e-6 ? const ui.Offset(1, 0) : vec / len;
+      final b = a + dir * normalLen;
+      c.drawLine(a, b, basePaint);
+    }
 
-    canvas.drawRect(
-      r,
-      Paint()
-        ..color = Colors.blue.withOpacity(0.1)
-        ..style = PaintingStyle.fill,
-    );
+    if (debugOverlay.newNormalOrigin != null &&
+        debugOverlay.newNormalVector != null) {
+      final a = debugOverlay.newNormalOrigin!;
+      final vec = debugOverlay.newNormalVector!;
+      final len = vec.distance;
+      final dir = len < 1e-6 ? const ui.Offset(1, 0) : vec / len;
+      final b = a + dir * normalLen;
+      c.drawLine(a, b, newPaint);
+    }
 
-    canvas.drawRect(
-      r,
-      Paint()
-        ..color = Colors.blue.withOpacity(0.7)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
-    );
-  }
+    if (debugOverlay.offsetPoint != null) {
+      c.drawCircle(
+        debugOverlay.offsetPoint!,
+        80,
+        Paint()
+          ..color = Colors.greenAccent
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke,
+      );
+    }
 
-  // -------------------------------------------------------------
-  //                   HOVER VERTEX
-  // -------------------------------------------------------------
-
-  void _paintVertexHover(Canvas canvas) {
-    if (hoverVertex == null) return;
-
-    final p = _mm2px(hoverVertex!);
-
-    canvas.drawCircle(
-      p,
-      8,
-      Paint()
-        ..color = Colors.blueAccent
-        ..strokeWidth = 2.5
-        ..style = PaintingStyle.stroke,
-    );
-
-    canvas.drawCircle(
-      p,
-      4,
-      Paint()
-        ..color = Colors.blueAccent.withOpacity(0.85)
-        ..style = PaintingStyle.fill,
-    );
+    if (debugOverlay.snapPoint != null) {
+      final p = debugOverlay.snapPoint!;
+      final crossPaint = Paint()
+        ..color = Colors.pinkAccent
+        ..strokeWidth = stroke;
+      c.drawLine(p + const ui.Offset(-80, -80), p + const ui.Offset(80, 80), crossPaint);
+      c.drawLine(p + const ui.Offset(-80, 80), p + const ui.Offset(80, -80), crossPaint);
+    }
   }
 
   @override
-  bool shouldRepaint(WallPainter old) =>
-      walls != old.walls ||
-      rooms != old.rooms ||
-      dragA != old.dragA ||
-      dragB != old.dragB ||
-      hoverVertex != old.hoverVertex ||
-      selected != old.selected ||
-      marqueeWorld != old.marqueeWorld ||
-      gridOn != old.gridOn;
+  bool shouldRepaint(covariant WallPainter old) {
+    return old.walls != walls ||
+        old.k != k ||
+        old.panPx != panPx ||
+        old.debugMode != debugMode ||
+        old.debugOverlay != debugOverlay ||
+        old.highlightCorner != highlightCorner;
+  }
 }

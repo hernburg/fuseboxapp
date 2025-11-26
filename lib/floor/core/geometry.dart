@@ -2,66 +2,140 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-/// Длина вектора
-double len(ui.Offset v) => v.distance;
+/// Вектор в мировых координатах (мм)
+typedef Vec2 = ui.Offset;
 
-/// Скалярное произведение
-double dot(ui.Offset a, ui.Offset b) => a.dx * b.dx + a.dy * b.dy;
+/// Набор геометрических утилит,
+/// без знания о стенах / редакторе.
+class Geom {
+  /// Эпсилон для сравнения
+  static const double eps = 1e-6;
 
-/// Нормированный вектор (или zero)
-ui.Offset norm(ui.Offset v) {
-  final l = v.distance;
-  return l == 0 ? ui.Offset.zero : v / l;
+  static const Vec2 zero = ui.Offset.zero;
+
+  /// Нормализация вектора
+  static Vec2 normalize(Vec2 v) {
+    final len = v.distance;
+    if (len < eps) return zero;
+    return v / len;
+  }
+
+  /// Скалярное произведение
+  static double dot(Vec2 a, Vec2 b) => a.dx * b.dx + a.dy * b.dy;
+
+  /// Длина вектора
+  static double length(Vec2 v) => v.distance;
+
+  /// Расстояние между точками
+  static double distance(Vec2 a, Vec2 b) => (b - a).distance;
+
+  /// Перпендикуляр влево (-y, x)
+  static Vec2 perpLeft(Vec2 v) => ui.Offset(-v.dy, v.dx);
+
+  /// Перпендикуляр вправо (y, -x)
+  static Vec2 perpRight(Vec2 v) => ui.Offset(v.dy, -v.dx);
+
+  /// Линейная интерполяция
+  static Vec2 lerp(Vec2 a, Vec2 b, double t) => a + (b - a) * t;
+
+  /// Проекция точки на бесконечную прямую AB
+  static Vec2 projectPointOnLine(Vec2 p, Vec2 a, Vec2 b) {
+    final ab = b - a;
+    final denom = ab.dx * ab.dx + ab.dy * ab.dy;
+    if (denom.abs() < eps) return a;
+    final ap = p - a;
+    final t = (ap.dx * ab.dx + ap.dy * ab.dy) / denom;
+    return a + ab * t;
+  }
+
+  /// Проекция точки на ОТРЕЗОК AB, с обрезкой t в [0..1]
+  static Vec2 projectPointOnSegment(Vec2 p, Vec2 a, Vec2 b) {
+    final ab = b - a;
+    final denom = ab.dx * ab.dx + ab.dy * ab.dy;
+    if (denom.abs() < eps) return a;
+    final ap = p - a;
+    double t = (ap.dx * ab.dx + ap.dy * ab.dy) / denom;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    return a + ab * t;
+  }
+
+  /// Расстояние от точки до отрезка AB
+  static double distanceToSegment(Vec2 p, Vec2 a, Vec2 b) {
+    final proj = projectPointOnSegment(p, a, b);
+    return (p - proj).distance;
+  }
+
+  /// Проверка пересечения отрезков (включая концы)
+  static bool segmentsIntersect(
+    Vec2 a1,
+    Vec2 b1,
+    Vec2 a2,
+    Vec2 b2, {
+    bool includeEndpoints = true,
+  }) {
+    int sign(num x) => x > 0 ? 1 : (x < 0 ? -1 : 0);
+
+    double cross(Vec2 o, Vec2 p, Vec2 q) {
+      final op = p - o;
+      final oq = q - o;
+      return op.dx * oq.dy - op.dy * oq.dx;
+    }
+
+    final c1 = cross(a1, b1, a2);
+    final c2 = cross(a1, b1, b2);
+    final c3 = cross(a2, b2, a1);
+    final c4 = cross(a2, b2, b1);
+
+    if (includeEndpoints) {
+      if (c1 == 0 && _pointOnSegment(a2, a1, b1)) return true;
+      if (c2 == 0 && _pointOnSegment(b2, a1, b1)) return true;
+      if (c3 == 0 && _pointOnSegment(a1, a2, b2)) return true;
+      if (c4 == 0 && _pointOnSegment(b1, a2, b2)) return true;
+    }
+
+    return sign(c1) * sign(c2) < 0 && sign(c3) * sign(c4) < 0;
+  }
+
+  static bool _pointOnSegment(Vec2 p, Vec2 a, Vec2 b) {
+    final minX = math.min(a.dx, b.dx) - eps;
+    final maxX = math.max(a.dx, b.dx) + eps;
+    final minY = math.min(a.dy, b.dy) - eps;
+    final maxY = math.max(a.dy, b.dy) + eps;
+    if (p.dx < minX || p.dx > maxX || p.dy < minY || p.dy > maxY) return false;
+
+    final cross = (b.dx - a.dx) * (p.dy - a.dy) - (b.dy - a.dy) * (p.dx - a.dx);
+    return cross.abs() < eps;
+  }
+
+  /// Площадь многоугольника (абсолютная), точки в порядке обхода
+  static double polygonArea(List<Vec2> pts) {
+    if (pts.length < 3) return 0;
+    double sum = 0;
+    for (int i = 0; i < pts.length; i++) {
+      final p = pts[i];
+      final q = pts[(i + 1) % pts.length];
+      sum += p.dx * q.dy - p.dy * q.dx;
+    }
+    return sum.abs() * 0.5;
+  }
 }
 
-/// Левый нормаль к вектору
-ui.Offset leftNormal(ui.Offset v) {
-  final n = norm(v);
-  return ui.Offset(-n.dy, n.dx);
-}
+/// Возвращает единичный вектор, прилегающий к ближайшей оси (горизонт/вертикаль)
+/// с направлением, соответствующим жесту `v`.
+ui.Offset computeAxisDirection(ui.Offset v) {
+  if (v.distance < Geom.eps) {
+    return const ui.Offset(1, 0);
+  }
 
-/// Расстояние от точки до отрезка AB (в тех же единицах)
-double pointSegDist(ui.Offset p, ui.Offset a, ui.Offset b) {
-  final ab = b - a;
-  final ap = p - a;
-  final ab2 = ab.dx * ab.dx + ab.dy * ab.dy;
-  if (ab2 == 0) return (p - a).distance;
-  var t = dot(ap, ab) / ab2;
-  t = t.clamp(0.0, 1.0);
-  final proj = a + ab * t;
-  return (p - proj).distance;
-}
+  final absDx = v.dx.abs();
+  final absDy = v.dy.abs();
 
-/// Проверка «почти осевая» ориентация (по X или Y)
-bool isAxisAligned(ui.Offset a, ui.Offset b, {double angTolDeg = 2}) {
-  final v = b - a;
-  if (v == ui.Offset.zero) return true;
-  final ang = (math.atan2(v.dy, v.dx).abs() * 180 / math.pi) % 90;
-  final dev = math.min(ang, 90 - ang);
-  return dev <= angTolDeg;
-}
-
-/// Геометрический «знак поворота» (для пересечений/CCW)
-bool ccw(ui.Offset A, ui.Offset B, ui.Offset C) =>
-    (C.dy - A.dy) * (B.dx - A.dx) > (B.dy - A.dy) * (C.dx - A.dx);
-
-/// Пересечение отрезков (включая касания)
-bool segsIntersect(ui.Offset a1, ui.Offset b1, ui.Offset a2, ui.Offset b2) {
-  bool _overlap1D(double a, double b, double c, double d) =>
-      math.max(math.min(a, b), math.min(c, d)) <=
-      math.min(math.max(a, b), math.max(c, d));
-  final o = _overlap1D(a1.dx, b1.dx, a2.dx, b2.dx) &&
-      _overlap1D(a1.dy, b1.dy, a2.dy, b2.dy) &&
-      (ccw(a1, a2, b2) != ccw(b1, a2, b2)) &&
-      (ccw(a1, b1, a2) != ccw(a1, b1, b2));
-  return o;
-}
-
-/// Смещение пары точек A,B на постоянное расстояние offsetMm
-/// влево относительно направления A->B (для предварительного
-/// построения стен «по центру»/«по внутренней/внешней кромке»).
-List<ui.Offset> posShift(ui.Offset a, ui.Offset b, double offsetMm) {
-  final n = leftNormal(b - a);       // единичная левая нормаль
-  final shift = n * offsetMm;        // смещение в мм
-  return [a + shift, b + shift];
+  if (absDx >= absDy) {
+    final sign = v.dx >= 0 ? 1.0 : -1.0;
+    return ui.Offset(sign, 0);
+  } else {
+    final sign = v.dy >= 0 ? 1.0 : -1.0;
+    return ui.Offset(0, sign);
+  }
 }

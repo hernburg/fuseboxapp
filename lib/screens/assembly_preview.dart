@@ -59,7 +59,7 @@ class AssemblyPreview extends StatelessWidget {
                   width: 28,
                   height: 72,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(.12),
+                    color: Colors.white.withValues(alpha: .12),
                     borderRadius: const BorderRadius.only(
                       topLeft: Radius.circular(12),
                       bottomLeft: Radius.circular(12),
@@ -156,9 +156,9 @@ class _AssemblyPainter extends CustomPainter {
   final Paint _busPE = Paint()..color = const Color(0xFF2ECC71)..strokeWidth = 3;
 
   // провода вниз к автоматам
-  final Paint _L  = Paint()..color = const Color(0xFFE74C3C)..strokeWidth = 2;
-  final Paint _N  = Paint()..color = const Color(0xFF3498DB)..strokeWidth = 2;
-  final Paint _PE = Paint()..color = const Color(0xFF2ECC71)..strokeWidth = 2;
+  final Paint _wireL  = Paint()..color = const Color(0xFFE74C3C)..strokeWidth = 2;
+  final Paint _wireN  = Paint()..color = const Color(0xFF3498DB)..strokeWidth = 2;
+  final Paint _wirePe = Paint()..color = const Color(0xFF2ECC71)..strokeWidth = 2;
 
   final _bgBox = Paint()..color = const Color(0xFF101317);
   final _railLine = Paint()
@@ -213,9 +213,9 @@ class _AssemblyPainter extends CustomPainter {
         _rectDevice(c, rect, name: 'QF', mark: g.mark);
 
         // проводники вниз от шин
-        _wireDown(c, Offset(x + w * .50, busY), _L);   // фаза
-        _wireDown(c, Offset(x + w * .32, busY + 10), _N);
-        _wireDown(c, Offset(x + w * .68, busY + 20), _PE);
+        _wireDown(c, Offset(x + w * .50, busY), _wireL);   // фаза
+        _wireDown(c, Offset(x + w * .32, busY + 10), _wireN);
+        _wireDown(c, Offset(x + w * .68, busY + 20), _wirePe);
 
         x += w + 6;
       }
@@ -235,7 +235,7 @@ class _AssemblyPainter extends CustomPainter {
 
   // прямоугольник устройства с подписями
   void _rectDevice(Canvas c, Rect r, {required String name, required String mark}) {
-    final fill = Paint()..color = Colors.white.withOpacity(.08);
+    final fill = Paint()..color = Colors.white.withValues(alpha: .08);
     final stroke = Paint()
       ..color = Colors.white38
       ..style = PaintingStyle.stroke

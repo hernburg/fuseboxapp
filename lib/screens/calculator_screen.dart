@@ -262,14 +262,14 @@ class _KeyButton extends StatelessWidget {
                     begin: Alignment.bottomLeft,
                     end: Alignment.topRight,
                     colors: [
-                      const Color(0xFFF54B64).withOpacity(.45),
-                      const Color(0xFFF78361).withOpacity(.45),
+                      const Color(0xFFF54B64).withValues(alpha: .45),
+                      const Color(0xFFF78361).withValues(alpha: .45),
                     ],
                   )
                 : null,
-            color: isAccent ? null : Colors.white.withOpacity(0.08),
+            color: isAccent ? null : Colors.white.withValues(alpha: 0.08),
             border: Border.all(
-              color: isAccent ? Colors.transparent : kWhite.withOpacity(.18),
+              color: isAccent ? Colors.transparent : kWhite.withValues(alpha: .18),
             ),
           ),
           child: Center(

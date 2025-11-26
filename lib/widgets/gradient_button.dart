@@ -47,7 +47,7 @@ class GradientButton extends StatelessWidget {
             begin: Alignment.bottomLeft,
             end: Alignment.topRight,
             colors: disabled
-                ? [kGradA.withOpacity(.45), kGradB.withOpacity(.45)]
+                ? [kGradA.withValues(alpha: .45), kGradB.withValues(alpha: .45)]
                 : [kGradA, kGradB],
           ),
           borderRadius: radius,

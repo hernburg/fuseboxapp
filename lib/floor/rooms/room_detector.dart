@@ -1,199 +1,213 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
+
 import '../core/wall_model.dart';
 
-/// Узел (вершина графа)
-class Node {
-  final ui.Offset p;
-
-  Node(this.p);
-
-  @override
-  bool operator ==(Object other) =>
-      other is Node && (other.p - p).distance < 1e-3;
-
-  @override
-  int get hashCode => p.dx.hashCode ^ p.dy.hashCode;
-}
-class Edge {
-  final Node a;
-  final Node b;
-
-  Edge(this.a, this.b);
-
-  double get length => (b.p - a.p).distance;
-}
-class WallGraph {
-  final List<Node> nodes = [];
-  final List<Edge> edges = [];
-
-  Node getOrAddNode(ui.Offset p) {
-    for (final n in nodes) {
-      if ((n.p - p).distance < 1.0) return n;
-    }
-    final n = Node(p);
-    nodes.add(n);
-    return n;
-  }
-
-  void addWall(WallSeg w) {
-    final a = getOrAddNode(w.a);
-    final b = getOrAddNode(w.b);
-    edges.add(Edge(a, b));
-  }
-}
-List<List<Node>> findCycles(WallGraph g) {
-  final adj = <Node, List<Node>>{};
-  for (final e in g.edges) {
-    adj.putIfAbsent(e.a, () => []).add(e.b);
-    adj.putIfAbsent(e.b, () => []).add(e.a);
-  }
-
-  final visited = <Node>{};
-  final stack = <Node>[];
-  final cycles = <List<Node>>[];
-
-  void dfs(Node curr, Node start) {
-    visited.add(curr);
-    stack.add(curr);
-
-    for (final next in adj[curr]!) {
-      if (next == start && stack.length > 2) {
-        cycles.add(List<Node>.from(stack));
-      } else if (!visited.contains(next)) {
-        dfs(next, start);
-      }
-    }
-    stack.removeLast();
-    visited.remove(curr);
-  }
-
-  for (final n in g.nodes) {
-    dfs(n, n);
-    visited.clear();
-    stack.clear();
-  }
-
-  // удаляем дубли и самопересечения
-  final unique = <String, List<Node>>{};
-  for (final c in cycles) {
-    final key = c.map((n) => "${n.p.dx}:${n.p.dy}").join('|');
-    if (!unique.containsKey(key)) unique[key] = c;
-  }
-
-  return unique.values.toList();
-}
-ui.Path cycleToPath(List<Node> nodes) {
-  final path = ui.Path();
-  if (nodes.isEmpty) return path;
-
-  path.moveTo(nodes.first.p.dx, nodes.first.p.dy);
-  for (var i = 1; i < nodes.length; i++) {
-    path.lineTo(nodes[i].p.dx, nodes[i].p.dy);
-  }
-  path.close();
-  return path;
-}
-
-double polygonArea(ui.Path p) {
-  final metrics = p.computeMetrics().toList();
-  if (metrics.isEmpty) return 0;
-  // просто площадь через shoelace
-  final List<ui.Offset> pts = [];
-
-  for (final m in metrics) {
-    for (var t = 0.0; t < m.length; t += 10) {
-      pts.add(m.getTangentForOffset(t)!.position);
-    }
-  }
-
-  double sum = 0;
-  for (var i = 0; i < pts.length; i++) {
-    final j = (i + 1) % pts.length;
-    sum += pts[i].dx * pts[j].dy - pts[j].dx * pts[i].dy;
-  }
-  return sum.abs() / 2;
-}
-List<ui.Path> detectRoomsAllShapes(List<WallSeg> walls) {
-  final g = WallGraph();
-
-  for (final w in walls) {
-    g.addWall(w);
-  }
-
-  final cycles = findCycles(g);
-  if (cycles.isEmpty) return [];
-
-  final rooms = <ui.Path>[];
-  for (final c in cycles) {
-    final path = cycleToPath(c);
-    final area = polygonArea(path);
-
-    // площадь > 0.5 м² (отсекаем мусор)
-    if (area > 50000) {
-      rooms.add(path);
-    }
-  }
-
-  return rooms;
-}
-List<Room> detectRooms(List<WallSeg> walls) {
-  final paths = detectRoomsAllShapes(walls); // твоя функция, которая делает List<Path>
-
-  final result = <Room>[];
-
-  for (final p in paths) {
-    final outer = <ui.Offset>[];
-
-    // Извлекаем точки Path
-    for (final metric in p.computeMetrics()) {
-      final poly = <ui.Offset>[];
-
-      for (double t = 0; t < metric.length; t += 10) {
-        final pos = metric.getTangentForOffset(t)!.position;
-        poly.add(pos);
-      }
-
-      if (poly.length >= 3) {
-        outer.addAll(poly);
-      }
-    }
-
-    if (outer.length < 3) continue;
-
-    // Вычисление центра
-    final cx = outer.fold(0.0, (s, o) => s + o.dx) / outer.length;
-    final cy = outer.fold(0.0, (s, o) => s + o.dy) / outer.length;
-
-    // Вычисление площади (полигонный метод)
-    double area = 0;
-    for (int i = 0; i < outer.length; i++) {
-      final j = (i + 1) % outer.length;
-      area += outer[i].dx * outer[j].dy - outer[j].dx * outer[i].dy;
-    }
-    area = area.abs() / 2 / 1e6; // мм² → м²
-
-    result.add(
-      Room(
-        outer: outer,
-        holes: const [],
-        centerMm: ui.Offset(cx, cy),
-        areaM2: area,
-      ),
-    );
-  }
-
-  return result;
-}
+/// Представление комнаты (замкнутого цикла), измеренной по осям стен
+/// и пересчитанной через Shoelace formula.
 class Room {
   final List<ui.Offset> outer;            // внешний контур
   final List<List<ui.Offset>> holes;      // отверстия (обычно пусто)
-  final ui.Offset centerMm;               // центр комнаты
-  final double areaM2;                    // площадь м²
+  final ui.Offset centerMm;               // центр геометрический
+  final double areaM2;                    // площадь в м²
 
-  Room({
+  const Room({
     required this.outer,
     required this.holes,
     required this.centerMm,
     required this.areaM2,
   });
+}
+
+/// Публичное API для расчёта комнат.
+List<Room> detectRooms(List<WallSeg> walls) {
+  if (walls.length < 3) return const <Room>[];
+
+  final graph = _PlanarGraph.fromWalls(walls);
+  final faces = graph.extractFaces();
+
+  final rooms = <Room>[];
+  for (final face in faces) {
+    if (face.length < 3) continue;
+    final data = _shoelace(face);
+    if (data == null) continue;
+    final (areaMm2, centroid) = data;
+
+    // отсекаем слишком маленькие петли (< 0.5 м²) и внешнюю грань (отрицательная площадь)
+    if (areaMm2 <= 0) continue;
+    if (areaMm2 < 500000) continue; // 0.5 м²
+
+    rooms.add(Room(
+      outer: face,
+      holes: const [],
+      centerMm: centroid,
+      areaM2: areaMm2 / 1e6,
+    ));
+  }
+
+  return rooms;
+}
+
+/// Нормализованная вершина графа (с учётом допусков)
+class _Node {
+  final ui.Offset p;
+  final List<_HalfEdge> edges = [];
+
+  _Node(this.p);
+}
+
+class _HalfEdge {
+  final _Node from;
+  final _Node to;
+  final WallSeg wall;
+  final double angle;    // [0; 2π)
+  late final _HalfEdge twin;
+  bool visited = false;
+
+  _HalfEdge({
+    required this.from,
+    required this.to,
+    required this.wall,
+  }) : angle = _normAngle(
+          math.atan2(
+            to.p.dy - from.p.dy,
+            to.p.dx - from.p.dx,
+          ),
+        );
+}
+
+class _PlanarGraph {
+  final List<_Node> nodes;
+
+  const _PlanarGraph(this.nodes);
+
+  static _PlanarGraph fromWalls(List<WallSeg> walls) {
+    final map = <String, _Node>{};
+
+    _Node get(ui.Offset p) {
+      final key = '${p.dx.toStringAsFixed(3)}_${p.dy.toStringAsFixed(3)}';
+      return map.putIfAbsent(key, () => _Node(p));
+    }
+
+    final nodes = <_Node>{};
+
+    for (final wall in walls) {
+      final a = get(wall.a);
+      final b = get(wall.b);
+      nodes
+        ..add(a)
+        ..add(b);
+
+      final ab = _HalfEdge(from: a, to: b, wall: wall);
+      final ba = _HalfEdge(from: b, to: a, wall: wall);
+      ab.twin = ba;
+      ba.twin = ab;
+
+      a.edges.add(ab);
+      b.edges.add(ba);
+    }
+
+    for (final node in nodes) {
+      node.edges.sort(
+        (a, b) => a.angle.compareTo(b.angle),
+      );
+    }
+
+    return _PlanarGraph(nodes.toList());
+  }
+
+  List<List<ui.Offset>> extractFaces() {
+    final faces = <List<ui.Offset>>[];
+
+    for (final node in nodes) {
+      for (final edge in node.edges) {
+        if (edge.visited) continue;
+        final poly = _traverseFace(edge);
+        if (poly != null) {
+          faces.add(poly);
+        }
+      }
+    }
+
+    return faces;
+  }
+
+  List<ui.Offset>? _traverseFace(_HalfEdge start) {
+    final loop = <ui.Offset>[];
+    var current = start;
+    var safety = 0;
+
+    while (true) {
+      if (current.visited) return null; // уже разобранная грань
+      current.visited = true;
+
+      loop.add(current.from.p);
+
+      final next = _nextAroundCorner(current);
+      if (next == null) return null; // разрыв графа
+
+      current = next;
+      safety++;
+
+      if (identical(current, start)) {
+        break;
+      }
+
+      if (safety > 4096) {
+        // защита от зацикливания
+        return null;
+      }
+    }
+
+    return loop;
+  }
+
+  _HalfEdge? _nextAroundCorner(_HalfEdge incoming) {
+    final node = incoming.to;
+    if (node.edges.isEmpty) return null;
+
+    final idx = node.edges.indexOf(incoming.twin);
+    if (idx == -1) return null;
+
+    final prevIdx = (idx - 1) < 0 ? node.edges.length - 1 : idx - 1;
+    return node.edges[prevIdx];
+  }
+}
+
+double _normAngle(double value) {
+  final twoPi = 2 * math.pi;
+  var angle = value % twoPi;
+  if (angle < 0) angle += twoPi;
+  return angle;
+}
+
+(double, ui.Offset)? _shoelace(List<ui.Offset> poly) {
+  if (poly.length < 3) return null;
+
+  double twiceArea = 0;
+  double cx = 0;
+  double cy = 0;
+
+  for (var i = 0; i < poly.length; i++) {
+    final j = (i + 1) % poly.length;
+    final x1 = poly[i].dx;
+    final y1 = poly[i].dy;
+    final x2 = poly[j].dx;
+    final y2 = poly[j].dy;
+
+    final cross = x1 * y2 - x2 * y1;
+    twiceArea += cross;
+    cx += (x1 + x2) * cross;
+    cy += (y1 + y2) * cross;
+  }
+
+  if (twiceArea.abs() < 1e-3) return null;
+
+  final area = twiceArea / 2;
+  final centroid = ui.Offset(
+    cx / (3 * twiceArea),
+    cy / (3 * twiceArea),
+  );
+
+  return (area, centroid);
 }

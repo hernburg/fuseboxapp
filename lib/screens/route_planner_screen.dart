@@ -96,7 +96,7 @@ class _RoutePlannerScreenState extends State<RoutePlannerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final wallColor = Colors.white.withOpacity(.85);
+    final wallColor = Colors.white.withValues(alpha: .85);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Трассировка (черновик)')),
@@ -460,7 +460,7 @@ class _ExpandedPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final styleLbl = TextStyle(color: Colors.white70.withOpacity(.9));
+    final styleLbl = TextStyle(color: Colors.white70.withValues(alpha: .9));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -499,7 +499,8 @@ class _ExpandedPanel extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: DropdownButtonFormField<int?>(
-                value: activeGroupId,
+                key: ValueKey(activeGroupId),
+                initialValue: activeGroupId,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Активная группа'),
                 items: [
@@ -656,15 +657,15 @@ class _FieldPainter extends CustomPainter {
       final isSel = i == selectedIdx;
 
       if (isSel) {
-        c.drawCircle(center, 13, Paint()..color = p.color.withOpacity(.25));
+        c.drawCircle(center, 13, Paint()..color = p.color.withValues(alpha: .25));
         c.drawCircle(center, 11, Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 3
-          ..color = p.color.withOpacity(.9));
+          ..color = p.color.withValues(alpha: .9));
       }
 
       // маркер
-      final fill = Paint()..color = p.color.withOpacity(isSel ? .95 : .80);
+      final fill = Paint()..color = p.color.withValues(alpha: isSel ? .95 : .80);
       final stroke = Paint()
         ..color = Colors.black54
         ..style = PaintingStyle.stroke

@@ -1,5 +1,4 @@
 // lib/data/project_repo.dart
-import 'package:collection/collection.dart';
 import '../models/project.dart';
 
 class ProjectRepo {
@@ -25,7 +24,12 @@ class ProjectRepo {
     }
   }
 
-  Project? byId(String id) => _items.firstWhereOrNull((e) => e.id == id);
+  Project? byId(String id) {
+    for (final item in _items) {
+      if (item.id == id) return item;
+    }
+    return null;
+  }
 
   // примеры (если где-то читаешь/пишешь json)
   List<Map<String, dynamic>> dumpJson() => _items.map((e) => e.toJson()).toList();

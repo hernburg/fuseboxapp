@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 class CalcApi {
   static const Duration _timeout = Duration(seconds: 6);
 
-  /// Можно переопределить URL через --dart-define=CALC_URL=<url>
+  /// Можно переопределить URL через --dart-define=CALC_URL=your_calc_url
   static final String _baseUrl =
       const String.fromEnvironment('CALC_URL', defaultValue: 'http://127.0.0.1:3000');
 

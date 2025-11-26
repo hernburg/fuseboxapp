@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'screens/projects_home.dart';
 import 'theme/palette.dart';
 import 'screens/calculator_screen.dart';
+import 'screens/log_viewer.dart';   // ← 💛 добавлено
 
 void main() {
   ErrorWidget.builder = (FlutterErrorDetails d) =>
@@ -17,70 +18,62 @@ class FuseboxApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-  useMaterial3: true,
-  fontFamily: 'GOST', // ← глобально
-
-  scaffoldBackgroundColor: kBg,
-  colorScheme: ColorScheme.fromSeed(
-    seedColor: kGradA,
-    brightness: Brightness.dark,
-  ).copyWith(
-    surface: kBg,
-    onSurface: kWhite,
-    primary: kGradA,
-    onPrimary: kWhite,
-  ),
-
-  // Чётко задаём шрифт и цвет для всего текста
-  textTheme: const TextTheme().apply(
-    fontFamily: 'GOST',
-    bodyColor: kWhite,
-    displayColor: kWhite,
-  ),
-
-  appBarTheme: const AppBarTheme(
-    backgroundColor: kBg,
-    foregroundColor: kWhite,
-    elevation: 0,
-    centerTitle: true,
-    titleTextStyle: TextStyle(
-      fontFamily: 'GOST',
-      fontSize: 20,
-      fontWeight: FontWeight.w600,
-      color: kWhite,
-    ),
-  ),
-
-  cardTheme: CardThemeData(
-    color: Colors.white.withOpacity(0.08),
-    surfaceTintColor: Colors.transparent,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-    elevation: 0,
-  ),
-
-  // Важно: если задаёшь TextStyle вручную — укажи fontFamily, иначе он перетрет глобальный
-  inputDecorationTheme: InputDecorationTheme(
-    labelStyle: const TextStyle(fontFamily: 'GOST', color: kWhite),
-    hintStyle:  const TextStyle(fontFamily: 'GOST', color: kWhite),
-    enabledBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: kWhite.withOpacity(0.35)),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderSide: const BorderSide(color: kWhite, width: 1.4),
-      borderRadius: BorderRadius.circular(12),
-    ),
-  ),
-
-  navigationBarTheme: NavigationBarThemeData(
-    backgroundColor: kBg,
-    indicatorColor: kWhite.withOpacity(.12),
-    iconTheme: const MaterialStatePropertyAll(IconThemeData(color: kWhite)),
-    labelTextStyle: const MaterialStatePropertyAll(
-      TextStyle(fontFamily: 'GOST', color: kWhite),
-    ),
-  ),
-),
+        useMaterial3: true,
+        fontFamily: 'GOST',
+        scaffoldBackgroundColor: kBg,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: kGradA,
+          brightness: Brightness.dark,
+        ).copyWith(
+          surface: kBg,
+          onSurface: kWhite,
+          primary: kGradA,
+          onPrimary: kWhite,
+        ),
+        textTheme: const TextTheme().apply(
+          fontFamily: 'GOST',
+          bodyColor: kWhite,
+          displayColor: kWhite,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: kBg,
+          foregroundColor: kWhite,
+          elevation: 0,
+          centerTitle: true,
+          titleTextStyle: TextStyle(
+            fontFamily: 'GOST',
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+            color: kWhite,
+          ),
+        ),
+        cardTheme: CardThemeData(
+          color: Colors.white.withValues(alpha: 0.08),
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          elevation: 0,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          labelStyle: const TextStyle(fontFamily: 'GOST', color: kWhite),
+          hintStyle:  const TextStyle(fontFamily: 'GOST', color: kWhite),
+          enabledBorder: OutlineInputBorder(
+            borderSide: BorderSide(color: kWhite.withValues(alpha: 0.35)),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderSide: const BorderSide(color: kWhite, width: 1.4),
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: kBg,
+          indicatorColor: kWhite.withValues(alpha: .12),
+          iconTheme: const WidgetStatePropertyAll(IconThemeData(color: kWhite)),
+          labelTextStyle: const WidgetStatePropertyAll(
+            TextStyle(fontFamily: 'GOST', color: kWhite),
+          ),
+        ),
+      ),
       home: const HomeShell(),
     );
   }
@@ -95,17 +88,15 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _idx = 0;
 
-  // Важно: есть тип и подчёркивание в имени
   late final List<Widget> _pages = [
-  const ProjectsHome(),
-  const CalculatorScreen(), // здесь у нас const конструктор, см. код выше
-  const _Stub(title: 'Редактор (канва будет позже)'),
-  const _Stub(title: 'Профиль (подписка/токены позже)'),
-];
+    const ProjectsHome(),
+    const CalculatorScreen(),
+    const _Stub(title: 'Редактор'),
+    const _Stub(title: 'Профиль'),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    // страховка от выхода индекса за границы после перестановок
     if (_idx >= _pages.length) _idx = _pages.length - 1;
 
     return Scaffold(
