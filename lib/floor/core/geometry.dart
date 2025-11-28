@@ -5,8 +5,7 @@ import 'vec2.dart';
 
 /// Класс Geometry предоставляет геометрические утилиты для построения стен и анализа пересечений.
 class Geometry {
-  static int _segmentIdCounter = 0;
-  static int _nextSegmentId() => _segmentIdCounter++;
+  // Removed unused segment id generator. NodeGraph handles ID generation.
 
   static bool segmentsIntersect(Vec2 a, Vec2 b, Vec2 c, Vec2 d) {
     bool straddles(Vec2 p, Vec2 q, Vec2 r, Vec2 s) {
@@ -47,8 +46,9 @@ class Geometry {
 
   static double _pointToLineDistance(Vec2 a, Vec2 b, Vec2 p) {
     double area2 = ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)).abs();
-    double base = (b - a).length();
-    return base < 1e-9 ? (p - a).length() : area2 / base;
+    // Use Vec2.length getter; don't call it like a function
+    double base = (b - a).length;
+    return base < 1e-9 ? (p - a).length : area2 / base;
   }
 
   static bool isDuplicateSegment(WallSegment a, WallSegment b) {

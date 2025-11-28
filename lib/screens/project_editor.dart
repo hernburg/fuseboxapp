@@ -7,6 +7,8 @@ import '../api/calc_api.dart';
 import '../widgets/fake_progress.dart';
 import 'assembly_preview.dart';
 import 'floor_editor.dart'; // переход в рисовалку этажа
+import 'floor_editor_screen.dart';
+
 
 class ProjectEditor extends StatefulWidget {
   final Project project;
@@ -262,7 +264,7 @@ class _ProjectEditorState extends State<ProjectEditor> {
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => FloorEditor(),
+                      builder: (_) => const FloorEditorScreen(),
                     ),
                   );
                   setState(() {}); // обновить превью/названия после возврата

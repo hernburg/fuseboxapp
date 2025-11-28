@@ -23,8 +23,8 @@ class WallBuilderV5 {
   }
 
   static WallSegment? buildFree(Vec2 p1, Vec2 p2) {
-    Vec2 delta = p2 - p1;
-    double length = delta.length();
+  Vec2 delta = p2 - p1;
+  double length = delta.length;
     if (length < 20.0) return null;
 
     double angle = atan2(delta.y, delta.x);
@@ -65,7 +65,7 @@ class WallBuilderV5 {
     Vec2 newNormRight = newDir.rotated90CW();
     bool newThickToLeft = (baseOuterNorm.dot(newNormLeft) >= baseOuterNorm.dot(newNormRight));
 
-    double projLength = gestureDir.dot(newDir) * gestureDir.length();
+  double projLength = gestureDir.dot(newDir) * gestureDir.length;
     if (projLength < 20.0) return null;
 
     Vec2 newP2 = nodePoint + newDir * projLength;
@@ -108,7 +108,7 @@ class WallBuilderV5 {
     Vec2 newNormRight = newDir.rotated90CW();
     bool newThickToLeft = (baseOuterNorm.dot(newNormLeft) >= baseOuterNorm.dot(newNormRight));
 
-    double projLength = gestureDir.dot(newDir) * gestureDir.length();
+  double projLength = gestureDir.dot(newDir) * gestureDir.length;
     if (projLength < 20.0) return null;
 
     Vec2 newP2 = attachPoint + newDir * projLength;

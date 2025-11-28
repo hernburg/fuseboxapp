@@ -1,0 +1,47 @@
+*** Begin Patch
+*** Update File: lib/floor/core/geometry.dart
+@@
+ class Geometry {
+-  static int _segmentIdCounter = 0;
+-  static int _nextSegmentId() => _segmentIdCounter++;
++  // Removed unused segment id generator. NodeGraph handles ID generation.
+@@ static double _pointToLineDistance(Vec2 a, Vec2 b, Vec2 p) {
+-    double base = (b - a).length();
+-    return base < 1e-9 ? (p - a).length() : area2 / base;
++    // Use Vec2.length getter; don't call it like a function
++    double base = (b - a).length;
++    return base < 1e-9 ? (p - a).length : area2 / base;
+*** End Patch
+
+*** Begin Patch
+*** Update File: lib/floor/core/node_graph.dart
+@@ void mergeNodesIfClose({double eps = 1.0}) {
+-        if ((a.p2 - b.p1).length() < eps) {
++        if ((a.p2 - b.p1).length < eps) {
+@@ void mergeNodesIfClose({double eps = 1.0}) {
+-        if ((a.p1 - b.p1).length() < eps) {
++        if ((a.p1 - b.p1).length < eps) {
+@@ void mergeNodesIfClose({double eps = 1.0}) {
+-        if ((a.p2 - b.p2).length() < eps) {
++        if ((a.p2 - b.p2).length < eps) {
+@@ void mergeNodesIfClose({double eps = 1.0}) {
+-        if ((a.p1 - b.p2).length() < eps) {
++        if ((a.p1 - b.p2).length < eps) {
+@@ void adjustCornersAtNode(WallNode node) {
+-      Vec2 dirA = (a.p2 - a.p1).normalized();
+-      if ((node.position - a.p2).length() < 1e-6) {
++      Vec2 dirA = (a.p2 - a.p1).normalized();
++      if ((node.position - a.p2).length < 1e-6) {
+@@ void adjustCornersAtNode(WallNode node) {
+-      Vec2 dirB = (b.p2 - b.p1).normalized();
+-      if ((node.position - b.p2).length() < 1e-6) {
++      Vec2 dirB = (b.p2 - b.p1).normalized();
++      if ((node.position - b.p2).length < 1e-6) {
+*** End Patch
+
+*** Begin Patch
+*** Update File: lib/floor/edit/pick_corner.dart
+@@ WallSegment pickNearestWallForNode(Vec2 nodePos, List<WallSegment> candidates, Vec2 gestureVector) {
+-    if ((wall.p2 - nodePos).length() < 1e-6) {
++    if ((wall.p2 - nodePos).length < 1e-6) {
+*** End Patch
