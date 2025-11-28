@@ -1,93 +1,45 @@
-import 'dart:math' as math;
-import 'dart:ui' as ui;
-import 'snap_hit.dart';
+import '../core/vec2.dart';
 import '../core/wall_model.dart';
+import 'snap_hit.dart';
+import '../core/node_graph.dart';
 
-SnapHit findSnap(ui.Offset p, List<WallSeg> walls, SnapSettings set) {
-  if (!set.enabled) {
-    return SnapHit(kind: SnapKind.none, snapped: p);
-  }
+class SnapManager {
+  final List<WallSegment> walls;
+  final NodeGraph nodeGraph;
+  static const double snapNodeRadius = 10.0;
+  static const double snapEdgeThreshold = 8.0;
 
-  // --- сначала ищем вершины ---
-  for (final w in walls) {
-    if ((p - w.a).distance <= set.vertexRadiusMm) {
-      final isLeft = _isLeftOfWall(w, origin: w.a, point: p);
-      return SnapHit(
-        kind: SnapKind.vertex,
-        snapped: w.a,
-        vertex: w.a,
-        wall: w,
-        isLeftSide: isLeft,
-      );
-    }
-    if ((p - w.b).distance <= set.vertexRadiusMm) {
-      final isLeft = _isLeftOfWall(w, origin: w.b, point: p);
-      return SnapHit(
-        kind: SnapKind.vertex,
-        snapped: w.b,
-        vertex: w.b,
-        wall: w,
-        isLeftSide: isLeft,
-      );
-    }
-  }
+  SnapManager({required this.walls, required this.nodeGraph});
 
-  // --- затем ищем попадание на грань ---
-  for (final w in walls) {
-    final ab = w.b - w.a;
-    final ap = p - w.a;
-    final t = (ap.dx * ab.dx + ap.dy * ab.dy) / (ab.distance * ab.distance);
-
-    if (t >= 0 && t <= 1) {
-      final proj = ui.Offset(w.a.dx + ab.dx * t, w.a.dy + ab.dy * t);
-      if ((proj - p).distance < 40) { // радиус снапа к грани
-        final left = (ab.dx * (p.dy - w.a.dy) - ab.dy * (p.dx - w.a.dx)) > 0;
-        return SnapHit(
-          kind: SnapKind.edge,
-          snapped: proj,
-          wall: w,
-          isLeftSide: left,
-        );
+  SnapHit findSnap(Vec2 point) {
+    for (var node in nodeGraph.nodes) {
+      if ((node.position - point).length() <= snapNodeRadius) {
+        return SnapHit(kind: SnapKind.node, snapped: node.position);
       }
     }
+
+    for (var wall in walls) {
+      Vec2 ab = wall.p2 - wall.p1;
+      Vec2 ap = point - wall.p1;
+      double t = (ap.dot(ab)) / (ab.dot(ab));
+      if (t >= 0 && t <= 1) {
+        Vec2 proj = wall.p1 + ab * t;
+        if ((proj - point).length() <= snapEdgeThreshold) {
+          Vec2 wallDir = (wall.p2 - wall.p1).normalized();
+          Vec2 normLeft = wallDir.rotated90CCW();
+          Vec2 normRight = wallDir.rotated90CW();
+          Vec2 vecFromWall = point - proj;
+          bool isLeft = vecFromWall.dot(normLeft) >= vecFromWall.dot(normRight);
+          return SnapHit(
+            kind: SnapKind.edge,
+            snapped: proj,
+            wall: wall,
+            isLeftSide: isLeft,
+          );
+        }
+      }
+    }
+
+    return SnapHit(kind: SnapKind.none, snapped: point);
   }
-
-  return SnapHit(kind: SnapKind.none, snapped: p);
-}
-
-bool _isLeftOfWall(
-  WallSeg wall, {
-  required ui.Offset origin,
-  required ui.Offset point,
-}) {
-  final dir = wall.dir;
-  final rel = point - origin;
-
-  final cross = dir.dx * rel.dy - dir.dy * rel.dx;
-  if (cross.abs() < 1e-6) {
-    return true;
-  }
-  return cross > 0;
-}
-ui.Offset computeAxisDirection(ui.Offset gesture) {
-  if (gesture.distance < 1e-6) {
-    return const ui.Offset(1, 0);
-  }
-
-  final g = gesture / gesture.distance;
-
-  final angle = math.atan2(g.dy, g.dx) * 180.0 / math.pi;
-  final absAngle = angle.abs();
-
-  // около горизонтали
-  if (absAngle <= 3 || absAngle >= 177) {
-    return ui.Offset(g.dx.sign, 0);
-  }
-
-  // около вертикали
-  if ((absAngle - 90).abs() <= 3) {
-    return ui.Offset(0, g.dy.sign);
-  }
-
-  return g;
 }
