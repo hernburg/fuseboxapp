@@ -9,6 +9,11 @@ flutter_*.png
 generated_plugin_registrant.*
 *.lock
 
+hernburg/*
+!hernburg/fusebox_app/
+!hernburg/fusebox_app/**
+
+
 # IDE
 .idea/
 *.iml

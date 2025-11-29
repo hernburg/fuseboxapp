@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'screens/projects_home.dart';
 import 'theme/palette.dart';
 import 'screens/calculator_screen.dart';
-import 'screens/log_viewer.dart';   // ← 💛 добавлено
 
 void main() {
   ErrorWidget.builder = (FlutterErrorDetails d) =>

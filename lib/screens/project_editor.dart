@@ -6,7 +6,6 @@ import '../models/project.dart';
 import '../api/calc_api.dart';
 import '../widgets/fake_progress.dart';
 import 'assembly_preview.dart';
-import 'floor_editor.dart'; // переход в рисовалку этажа
 import 'floor_editor_screen.dart';
 
 

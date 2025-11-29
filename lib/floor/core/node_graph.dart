@@ -108,11 +108,8 @@ class NodeGraph {
       if (dot.abs() > 0.999) return;
 
       if (dot.abs() < 0.1) {
-        Vec2 aInnerLineDir = a.thickToLeft ? dirA.rotated90CW() : dirA.rotated90CCW();
-        Vec2 bInnerLineDir = b.thickToLeft ? dirB.rotated90CW() : dirB.rotated90CCW();
-
-        Vec2 innerCornerPoint = node.position;
-
+        // Very sharp corner — inner corner should be at the node position
+        final innerCornerPoint = node.position;
         if (a.thickToLeft) {
           a.r1 = innerCornerPoint;
         } else {

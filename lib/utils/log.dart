@@ -8,7 +8,6 @@
 // На реальном устройстве путь будет другой (Documents)
 
 import 'dart:io';
-import 'package:path_provider/path_provider.dart';
 
 /// Имя лог-файла по умолчанию
 const String _defaultLogName = 'app.log';

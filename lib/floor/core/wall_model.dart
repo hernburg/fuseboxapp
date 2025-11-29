@@ -1,9 +1,8 @@
-import 'geometry.dart';
 import 'node_graph.dart';
 import 'vec2.dart';
 
 class WallSegment {
-  static const double defaultThickness = 100.0;
+  static const double defaultThickness = 200.0;
   final int id;
   Vec2 p1;
   Vec2 p2;
@@ -78,6 +77,18 @@ class WallSegment {
     nodeStart?.replaceSegment(oldSeg: this, newSeg: part1);
     nodeEnd?.replaceSegment(oldSeg: this, newSeg: part2);
     return [part1, part2];
+  }
+
+  WallSegment copy() {
+    return WallSegment(
+      id: NodeGraph.newSegmentId(),
+      p1: Vec2(p1.x, p1.y),
+      p2: Vec2(p2.x, p2.y),
+      thickness: thickness,
+      thickToLeft: thickToLeft,
+      nodeStart: nodeStart,
+      nodeEnd: nodeEnd,
+    );
   }
 }
 
