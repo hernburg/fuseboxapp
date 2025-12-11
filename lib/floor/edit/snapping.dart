@@ -13,7 +13,7 @@ class SnapManager {
 
   SnapHit findSnap(Vec2 point) {
     for (var node in nodeGraph.nodes) {
-      if ((node.position - point).length() <= snapNodeRadius) {
+      if ((node.position - point).length <= snapNodeRadius) {
         return SnapHit(kind: SnapKind.node, snapped: node.position);
       }
     }
@@ -24,7 +24,7 @@ class SnapManager {
       double t = (ap.dot(ab)) / (ab.dot(ab));
       if (t >= 0 && t <= 1) {
         Vec2 proj = wall.p1 + ab * t;
-        if ((proj - point).length() <= snapEdgeThreshold) {
+        if ((proj - point).length <= snapEdgeThreshold) {
           Vec2 wallDir = (wall.p2 - wall.p1).normalized();
           Vec2 normLeft = wallDir.rotated90CCW();
           Vec2 normRight = wallDir.rotated90CW();

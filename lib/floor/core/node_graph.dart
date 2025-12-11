@@ -11,22 +11,37 @@ class NodeGraph {
 
   static int newSegmentId() => _nextSegmentId++;
 
+  void rebuildFromWalls({double eps = 0.5}) {
+    nodes.clear();
+    for (final wall in walls) {
+      final start = _getOrCreateNode(wall.p1, eps: eps);
+      final end = _getOrCreateNode(wall.p2, eps: eps);
+
+      wall.nodeStart = start;
+      wall.nodeEnd = end;
+      start.attachSegments([wall]);
+      end.attachSegments([wall]);
+      wall.updateCorners();
+    }
+    mergeNodesIfClose(eps: eps);
+  }
+
   void mergeNodesIfClose({double eps = 1.0}) {
     for (int i = 0; i < walls.length; i++) {
       for (int j = i + 1; j < walls.length; j++) {
         WallSegment a = walls[i];
         WallSegment b = walls[j];
 
-        if ((a.p2 - b.p1).length() < eps) {
+        if ((a.p2 - b.p1).length < eps) {
           _unifyNodes(segA: a, endOfA: true, segB: b, startOfB: true);
         }
-        if ((a.p1 - b.p1).length() < eps) {
+        if ((a.p1 - b.p1).length < eps) {
           _unifyNodes(segA: a, endOfA: false, segB: b, startOfB: true);
         }
-        if ((a.p2 - b.p2).length() < eps) {
+        if ((a.p2 - b.p2).length < eps) {
           _unifyNodes(segA: a, endOfA: true, segB: b, startOfB: false);
         }
-        if ((a.p1 - b.p2).length() < eps) {
+        if ((a.p1 - b.p2).length < eps) {
           _unifyNodes(segA: a, endOfA: false, segB: b, startOfB: false);
         }
       }
@@ -63,7 +78,7 @@ class NodeGraph {
 
   WallNode? _findNodeAt(Vec2 pos, {double eps = 0.5}) {
     for (var node in nodes) {
-      if ((node.position - pos).length() < eps) {
+      if ((node.position - pos).length < eps) {
         return node;
       }
     }
@@ -79,12 +94,12 @@ class NodeGraph {
       WallSegment b = segs[1];
 
       Vec2 dirA = (a.p2 - a.p1).normalized();
-      if ((node.position - a.p2).length() < 1e-6) {
+      if ((node.position - a.p2).length < 1e-6) {
         dirA = (a.p1 - a.p2).normalized();
       }
 
       Vec2 dirB = (b.p2 - b.p1).normalized();
-      if ((node.position - b.p2).length() < 1e-6) {
+      if ((node.position - b.p2).length < 1e-6) {
         dirB = (b.p1 - b.p2).normalized();
       }
 
@@ -135,5 +150,15 @@ class NodeGraph {
         seg.updateCorners();
       }
     }
+  }
+
+  WallNode _getOrCreateNode(Vec2 pos, {double eps = 0.5}) {
+    return _findNodeAt(pos, eps: eps) ?? _createNode(pos);
+  }
+
+  WallNode _createNode(Vec2 pos) {
+    final node = WallNode(position: pos);
+    nodes.add(node);
+    return node;
   }
 }

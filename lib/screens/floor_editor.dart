@@ -1,141 +1,257 @@
-import '../floor/core/vec2.dart';
+import 'package:flutter/material.dart';
+
 import '../floor/core/geometry.dart';
 import '../floor/core/node_graph.dart';
+import '../floor/core/vec2.dart';
 import '../floor/core/wall_model.dart';
+import '../floor/draw/wall_painter.dart';
+import '../floor/edit/pick_corner.dart';
+import '../floor/edit/snap_hit.dart';
 import '../floor/edit/snapping.dart';
 import '../floor/edit/wall_builder_v5.dart';
-import '../floor/edit/pick_corner.dart';
 
+class FloorEditor extends StatefulWidget {
+  const FloorEditor({super.key});
 
-class FloorEditor {
+  @override
+  State<FloorEditor> createState() => _FloorEditorState();
+}
+
+class _FloorEditorState extends State<FloorEditor> {
+  late final FloorEditorController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = FloorEditorController();
+    _controller.addListener(_handleControllerUpdate);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_handleControllerUpdate);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleControllerUpdate() => setState(() {});
+
+  void _onPointerDown(PointerDownEvent event) {
+    _controller.startDraw(_toVec(event.localPosition));
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    _controller.updateDraw(_toVec(event.localPosition));
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    _controller.endDraw();
+  }
+
+  void _onPointerCancel(PointerCancelEvent event) {
+    _controller.cancelDraw();
+  }
+
+  Vec2 _toVec(Offset offset) => Vec2(offset.dx, offset.dy);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Редактор этажа'),
+      ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return Listener(
+            onPointerDown: _onPointerDown,
+            onPointerMove: _onPointerMove,
+            onPointerUp: _onPointerUp,
+            onPointerCancel: _onPointerCancel,
+            child: Container(
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
+              color: Colors.grey.shade100,
+              child: CustomPaint(
+                painter: WallPainter(
+                  _controller.walls,
+                  preview: _controller.previewWalls,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class FloorEditorController extends ChangeNotifier {
   static const double minWallLength = 20.0;
+
   final List<WallSegment> _walls = [];
-  late NodeGraph _nodeGraph;
+  final List<WallSegment> _previewWalls = [];
+  late final NodeGraph _nodeGraph;
+
   bool _drawing = false;
   Vec2? _p1;
   SnapHit? _snapStart;
-  final List<WallSegment> _previewWalls = [];
 
-  FloorEditor() {
+  FloorEditorController() {
     _nodeGraph = NodeGraph(walls: _walls);
   }
 
+  List<WallSegment> get walls => List.unmodifiable(_walls);
+
+  List<WallSegment> get previewWalls => List.unmodifiable(_previewWalls);
+
   void startDraw(Vec2 point) {
-    SnapHit snap = SnapManager(walls: _walls, nodeGraph: _nodeGraph).findSnap(point);
-    if (snap.kind == SnapKind.edge) {
-      _p1 = snap.snapped;
-      _snapStart = snap;
-    } else if (snap.kind == SnapKind.node) {
-      _p1 = snap.snapped;
-      _snapStart = snap;
-    } else {
-      _p1 = point;
-      _snapStart = SnapHit(kind: SnapKind.none, snapped: point);
-    }
+    final snap = SnapManager(walls: _walls, nodeGraph: _nodeGraph).findSnap(point);
+    _snapStart = snap;
+    _p1 = snap.snapped;
     _drawing = true;
+    _previewWalls.clear();
+    notifyListeners();
   }
 
   void updateDraw(Vec2 point) {
     if (!_drawing || _p1 == null) return;
-    _previewWalls.clear();
-    SnapHit snapEnd = SnapManager(walls: _walls, nodeGraph: _nodeGraph).findSnap(point);
-    Vec2 p2 = snapEnd.snapped;
-    WallSegment? previewWall;
 
-    if (_snapStart != null && _snapStart!.kind == SnapKind.edge) {
-      WallSegment base = _snapStart!.wall!;
-      bool isLeft = _snapStart!.isLeftSide;
+    _previewWalls.clear();
+    final snapEnd = SnapManager(walls: _walls, nodeGraph: _nodeGraph).findSnap(point);
+    final Vec2 p2 = snapEnd.snapped;
+
+    WallSegment? previewWall;
+    if (_snapStart?.kind == SnapKind.edge && _snapStart?.wall != null) {
+      final base = _snapStart!.wall!;
+      final isLeft = _snapStart!.isLeftSide;
       previewWall = WallBuilderV5.buildFromSide(base, _p1!, isLeft, p2 - _p1!);
-    } else if (_snapStart != null && _snapStart!.kind == SnapKind.node) {
-      WallSegment base = _determineBaseWallForNode(_p1!, p2 - _p1!);
+    } else if (_snapStart?.kind == SnapKind.node) {
+      final base = _determineBaseWallForNode(_p1!, p2 - _p1!);
       previewWall = WallBuilderV5.buildFromCorner(base, _p1!, p2 - _p1!);
     } else {
       previewWall = WallBuilderV5.buildFree(_p1!, p2);
     }
 
-    if (previewWall != null) {
+    if (previewWall != null && (previewWall.p2 - previewWall.p1).length >= minWallLength) {
       _previewWalls.add(previewWall);
     }
-  }
-
-  WallSegment _determineBaseWallForNode(Vec2 nodePos, Vec2 gestureVector) {
-    List<WallSegment> adjacent = _walls.where((w) => (w.p1 - nodePos).length() < 1e-6 || (w.p2 - nodePos).length() < 1e-6).toList();
-    if (adjacent.isEmpty) {
-      throw Exception("Base wall not found for node at $nodePos");
-    }
-    if (adjacent.length == 1) return adjacent.first;
-    return pickNearestWallForNode(nodePos, adjacent, gestureVector);
+    notifyListeners();
   }
 
   void endDraw() {
     if (!_drawing) return;
     _drawing = false;
-    for (WallSegment seg in _previewWalls) {
-      _walls.add(seg);
+
+    if (_previewWalls.isEmpty) {
+      _resetPreview();
+      notifyListeners();
+      return;
     }
 
-    _nodeGraph.mergeNodesIfClose();
-
-    if (_previewWalls.isNotEmpty) {
-      WallSegment newSeg = _previewWalls.first;
-      for (WallSegment wall in List.from(_walls)) {
-        if (wall == newSeg) continue;
-        if (Geometry.segmentsIntersect(newSeg.p1, newSeg.p2, wall.p1, wall.p2)) {
-          if ((newSeg.p1 - wall.p1).length() < 1e-6 || (newSeg.p1 - wall.p2).length() < 1e-6 ||
-              (newSeg.p2 - wall.p1).length() < 1e-6 || (newSeg.p2 - wall.p2).length() < 1e-6) {
-            continue;
-          } else {
-            Vec2 inter = Geometry.intersectionPoint(newSeg.p1, newSeg.p2, wall.p1, wall.p2);
-            List<WallSegment> newSegParts = newSeg.splitAt(inter);
-            List<WallSegment> wallParts = wall.splitAt(inter);
-            _walls.remove(newSeg);
-            _walls.remove(wall);
-            _walls.addAll(newSegParts);
-            _walls.addAll(wallParts);
-            WallNode node = _nodeGraph.nodes.last;
-            _nodeGraph.adjustCornersAtNode(node);
-            newSeg = newSegParts[0];
-          }
-        }
-      }
+    for (final seg in List<WallSegment>.from(_previewWalls)) {
+      _addWallWithSplits(seg);
     }
 
-    for (int i = 0; i < _walls.length; i++) {
-      for (int j = i + 1; j < _walls.length; j++) {
-        WallSegment a = _walls[i];
-        WallSegment b = _walls[j];
-        if (Geometry.isDuplicateSegment(a, b)) {
-          _walls.removeAt(j);
-          j--;
-          continue;
-        }
-        if (Geometry.areCollinear(a, b)) {
-          WallSegment? merged = Geometry.mergeCollinear(a, b);
-          if (merged != null) {
-            _walls.remove(b);
-            _walls.remove(a);
-            _walls.add(merged);
-            _nodeGraph.mergeNodesIfClose();
-            if (merged.nodeStart != null) _nodeGraph.adjustCornersAtNode(merged.nodeStart!);
-            if (merged.nodeEnd != null) _nodeGraph.adjustCornersAtNode(merged.nodeEnd!);
-            i = -1;
-            break;
-          }
-        }
-      }
-    }
-
-    _previewWalls.clear();
-    _snapStart = null;
-    _p1 = null;
+    _mergeCollinearWalls();
+    _nodeGraph.rebuildFromWalls();
+    _resetPreview();
+    notifyListeners();
   }
 
   void cancelDraw() {
     _drawing = false;
+    _resetPreview();
+    notifyListeners();
+  }
+
+  WallSegment _determineBaseWallForNode(Vec2 nodePos, Vec2 gestureVector) {
+    final node = _nodeGraph.nodes.firstWhere(
+      (n) => (n.position - nodePos).length < 1e-3,
+      orElse: () => WallNode(position: nodePos),
+    );
+    final adjacent = node.segments.isNotEmpty
+        ? node.segments
+        : _walls.where((w) => (w.p1 - nodePos).length < 1e-3 || (w.p2 - nodePos).length < 1e-3).toList();
+
+    if (adjacent.isEmpty) {
+      throw Exception('Base wall not found for node at $nodePos');
+    }
+    if (adjacent.length == 1) return adjacent.first;
+    return pickNearestWallForNode(nodePos, adjacent, gestureVector);
+  }
+
+  void _addWallWithSplits(WallSegment candidate) {
+    final queue = <WallSegment>[candidate];
+    while (queue.isNotEmpty) {
+      final seg = queue.removeLast();
+      if ((seg.p2 - seg.p1).length < minWallLength) continue;
+
+      bool splitOccurred = false;
+      for (int i = 0; i < _walls.length; i++) {
+        final wall = _walls[i];
+        final inter = _intersectionExcludingShared(seg, wall);
+        if (inter == null) continue;
+
+        final newSegParts = seg.splitAt(inter);
+        final wallParts = wall.splitAt(inter);
+        _walls.removeAt(i);
+        _walls.insertAll(i, wallParts);
+        queue.addAll(newSegParts);
+        splitOccurred = true;
+        break;
+      }
+
+      if (!splitOccurred) {
+        _walls.add(seg);
+      }
+    }
+  }
+
+  Vec2? _intersectionExcludingShared(WallSegment a, WallSegment b) {
+    if (!Geometry.segmentsIntersect(a.p1, a.p2, b.p1, b.p2)) return null;
+    final inter = Geometry.intersectionPoint(a.p1, a.p2, b.p1, b.p2);
+    final onA = _isNear(inter, a.p1) || _isNear(inter, a.p2);
+    final onB = _isNear(inter, b.p1) || _isNear(inter, b.p2);
+    if (onA && onB) return null;
+    return inter;
+  }
+
+  bool _isNear(Vec2 a, Vec2 b, {double eps = 1e-6}) => (a - b).length < eps;
+
+  void _mergeCollinearWalls() {
+    bool changed;
+    do {
+      changed = false;
+      for (int i = 0; i < _walls.length; i++) {
+        for (int j = i + 1; j < _walls.length; j++) {
+          final a = _walls[i];
+          final b = _walls[j];
+
+          if (Geometry.isDuplicateSegment(a, b)) {
+            _walls.removeAt(j);
+            changed = true;
+            break;
+          }
+
+          if (Geometry.areCollinear(a, b)) {
+            final merged = Geometry.mergeCollinear(a, b);
+            if (merged != null) {
+              _walls.removeAt(j);
+              _walls.removeAt(i);
+              _walls.add(merged);
+              changed = true;
+              break;
+            }
+          }
+        }
+        if (changed) break;
+      }
+    } while (changed);
+  }
+
+  void _resetPreview() {
     _previewWalls.clear();
     _snapStart = null;
     _p1 = null;
   }
-
-  List<WallSegment> getAllWalls() => _walls;
 }

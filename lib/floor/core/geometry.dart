@@ -47,8 +47,8 @@ class Geometry {
 
   static double _pointToLineDistance(Vec2 a, Vec2 b, Vec2 p) {
     double area2 = ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)).abs();
-    double base = (b - a).length();
-    return base < 1e-9 ? (p - a).length() : area2 / base;
+    double base = (b - a).length;
+    return base < 1e-9 ? (p - a).length : area2 / base;
   }
 
   static bool isDuplicateSegment(WallSegment a, WallSegment b) {

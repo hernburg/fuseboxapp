@@ -91,10 +91,10 @@ class WallNode {
 
   void attachSegments(List<WallSegment> segs) {
     for (var seg in segs) {
-      if ((seg.p1 - position).length() < 1e-6) {
+      if ((seg.p1 - position).length < 1e-6) {
         seg.nodeStart = this;
       }
-      if ((seg.p2 - position).length() < 1e-6) {
+      if ((seg.p2 - position).length < 1e-6) {
         seg.nodeEnd = this;
       }
       segments.add(seg);
@@ -104,10 +104,10 @@ class WallNode {
   void replaceSegment({required WallSegment oldSeg, required WallSegment newSeg}) {
     segments.remove(oldSeg);
     segments.add(newSeg);
-    if ((newSeg.p1 - position).length() < 1e-6) {
+    if ((newSeg.p1 - position).length < 1e-6) {
       newSeg.nodeStart = this;
     }
-    if ((newSeg.p2 - position).length() < 1e-6) {
+    if ((newSeg.p2 - position).length < 1e-6) {
       newSeg.nodeEnd = this;
     }
   }
